@@ -1,14 +1,14 @@
 extern crate base64;
 extern crate byteorder;
 extern crate rand;
-extern crate sodiumoxide;
 extern crate serde;
 extern crate serde_bytes;
+extern crate sodiumoxide;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde_repr;
-extern crate rmp_serde;
 extern crate rmp;
+extern crate rmp_serde;
+extern crate serde_repr;
 
 mod encryption_header;
 mod header;

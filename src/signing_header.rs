@@ -1,11 +1,9 @@
-use crate::header::{
-    create_sender_secretbox, encrypt_payload_key_for_recipient, Mode, FORMAT_NAME, VERSION,
-};
+use crate::header::Mode;
 use base64;
 use sodiumoxide::crypto::box_;
 use std::fmt;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct SigningHeader {
     format_name: String,
     version: [u32; 2],

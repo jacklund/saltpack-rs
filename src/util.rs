@@ -1,8 +1,8 @@
 use base64;
 use rand;
-use std::iter;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::iter;
 
 pub fn generate_random_key() -> Vec<u8> {
     iter::repeat_with(rand::random::<u8>)

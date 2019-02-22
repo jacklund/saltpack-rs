@@ -12,22 +12,22 @@ use sodiumoxide::crypto::box_;
 use sodiumoxide::crypto::hash;
 use std::fmt;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct EncryptionRecipientPair {
     public_key: Option<PublicKey>,
     #[serde(with = "serde_bytes")]
     payload_key_box: Vec<u8>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct EncryptionHeader {
-    format_name: String,
-    version: [u32; 2],
-    mode: Mode,
-    public_key: box_::PublicKey,
+    pub format_name: String,
+    pub version: [u32; 2],
+    pub mode: Mode,
+    pub public_key: box_::PublicKey,
     #[serde(with = "serde_bytes")]
-    sender_secretbox: Vec<u8>,
-    recipients_list: Vec<EncryptionRecipientPair>,
+    pub sender_secretbox: Vec<u8>,
+    pub recipients_list: Vec<EncryptionRecipientPair>,
 }
 
 impl EncryptionHeader {
@@ -40,21 +40,18 @@ impl EncryptionHeader {
         // Create sender_secretbox
         let sender_secretbox = create_sender_secretbox(&sender, &payload_key);
 
-        let mut index: u64 = 0;
         let mut recipients_list: Vec<EncryptionRecipientPair> = vec![];
-        for recipient in recipients {
+        for (index, recipient) in recipients.iter().enumerate() {
             let payload_key_box = encrypt_payload_key_for_recipient(
                 &recipient,
-                index,
+                index as u64,
                 &payload_key,
-                &public_key,
                 &secret_key,
             );
             recipients_list.push(EncryptionRecipientPair {
-                public_key: Some(recipient.clone()),
+                public_key: Some(*recipient),
                 payload_key_box,
             });
-            index += 1;
         }
 
         EncryptionHeader {
@@ -90,8 +87,7 @@ impl fmt::Display for EncryptionHeader {
             "  sender secretbox: {}",
             base64::encode(&self.sender_secretbox)
         )?;
-        let mut index = 0;
-        for recipient in self.recipients_list.clone() {
+        for (index, recipient) in self.recipients_list.iter().enumerate() {
             writeln!(f, "  recipient {}:", index)?;
             writeln!(
                 f,
@@ -99,7 +95,7 @@ impl fmt::Display for EncryptionHeader {
                 if recipient.public_key.is_none() {
                     "nil".to_string()
                 } else {
-                    base64::encode(&recipient.public_key.unwrap().0)
+                    base64::encode(&recipient.public_key.unwrap())
                 }
             )?;
             writeln!(
@@ -107,9 +103,52 @@ impl fmt::Display for EncryptionHeader {
                 "    payload key box: {}",
                 base64::encode(&recipient.payload_key_box)
             )?;
-            index += 1;
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::encryption_header::EncryptionHeader;
+    use crate::header::Header;
+    use crate::keys::{from_binary, PublicKey, SecretKey};
+    use crate::util::{generate_random_key, read_base64_file};
+    use rmp::decode;
+    use rmp_serde::{Deserializer, Serializer};
+    use serde::{Deserialize, Serialize};
+    use std::io::Cursor;
+
+    #[test]
+    fn test_serialize_deserialize_encryption_header() {
+        let sender: SecretKey = from_binary(&generate_random_key()).unwrap();
+        let mut recipients: Vec<PublicKey> = vec![];
+        for _ in 0..4 {
+            recipients.push(from_binary(&generate_random_key()).unwrap());
+        }
+
+        let header: EncryptionHeader = EncryptionHeader::new(&sender, &recipients);
+
+        let mut buf: Vec<u8> = vec![];
+        header.serialize(&mut Serializer::new(&mut buf)).unwrap();
+        let mut de = Deserializer::new(&buf[..]);
+        let foo: EncryptionHeader = Deserialize::deserialize(&mut de).unwrap();
+        assert_eq!(header, foo);
+    }
+
+    #[test]
+    fn test_read_encryption_header() {
+        let data: Vec<u8> = read_base64_file("fixtures/encryption.txt");
+        let bin_header_len: usize = decode::read_bin_len(&mut data.as_slice()).unwrap() as usize;
+        let bin_header: Vec<u8> = data[3..(bin_header_len + 3)].to_vec();
+        let cur = Cursor::new(&bin_header[..]);
+        let mut de = Deserializer::new(cur);
+        let header: Header = Deserialize::deserialize(&mut de).unwrap();
+        if let Header::Encryption(encryption_header) = header {
+            assert_eq!(14, encryption_header.recipients_list.len());
+        } else {
+            assert!(false);
+        }
     }
 }
