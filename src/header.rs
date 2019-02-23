@@ -1,4 +1,4 @@
-use crate::encryption_header::EncryptionHeader;
+use crate::encryption::EncryptionHeader;
 use crate::keys::{PublicKey, SecretKey};
 use crate::signcryption_header::SigncryptionHeader;
 use crate::signing_header::SigningHeader;

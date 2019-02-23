@@ -10,7 +10,7 @@ extern crate rmp;
 extern crate rmp_serde;
 extern crate serde_repr;
 
-mod encryption_header;
+mod encryption;
 mod header;
 mod keys;
 mod signcryption_header;
