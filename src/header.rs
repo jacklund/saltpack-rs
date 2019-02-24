@@ -3,8 +3,13 @@ use crate::keys::{PublicKey, SecretKey};
 use crate::signcryption_header::SigncryptionHeader;
 use crate::signing_header::SigningHeader;
 use byteorder::{BigEndian, WriteBytesExt};
+use rmp::decode;
+use rmp_serde::Deserializer;
+use rmp_serde;
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use serde::Deserialize;
 use sodiumoxide::crypto::box_;
+use sodiumoxide::crypto::hash;
 use sodiumoxide::crypto::secretbox;
 use std::fmt;
 
@@ -28,6 +33,17 @@ pub enum Header {
     Encryption(EncryptionHeader),
     Signing(SigningHeader),
     Signcryption(SigncryptionHeader),
+}
+
+impl Header {
+    pub fn decode(mut data: &[u8]) -> Result<(hash::Digest, Self), rmp_serde::decode::Error> {
+        let bin_header_len: usize = decode::read_bin_len(&mut data).unwrap() as usize;
+        let bin_header: Vec<u8> = data[..(bin_header_len)].to_vec();
+        let mut de = Deserializer::new(bin_header.as_slice());
+        let digest: hash::Digest = hash::sha512::hash(&bin_header);
+        let header: Header = Deserialize::deserialize(&mut de)?;
+        Ok((digest, header))
+    }
 }
 
 impl fmt::Display for Header {

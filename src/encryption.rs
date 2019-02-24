@@ -348,11 +348,7 @@ mod tests {
     #[test]
     fn test_read_encryption_header() {
         let data: Vec<u8> = read_base64_file("fixtures/encryption.txt");
-        let bin_header_len: usize = decode::read_bin_len(&mut data.as_slice()).unwrap() as usize;
-        let bin_header: Vec<u8> = data[3..(bin_header_len + 3)].to_vec();
-        let cur = Cursor::new(&bin_header[..]);
-        let mut de = Deserializer::new(cur);
-        let header: Header = Deserialize::deserialize(&mut de).unwrap();
+        let (_header_hash, header) = Header::decode(&mut data.as_slice()).unwrap();
         if let Header::Encryption(encryption_header) = header {
             assert_eq!(14, encryption_header.recipients_list.len());
         } else {
