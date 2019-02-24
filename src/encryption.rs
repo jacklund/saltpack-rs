@@ -21,6 +21,7 @@ pub fn encrypt(sender_key: &SecretKey, recipients: &[PublicKey], message: &[u8])
     // Generate ephemeral keypair
     let (ephemeral_public_key, ephemeral_secret_key) = box_::gen_keypair();
 
+    // Generate encryption header
     let header: EncryptionHeader = EncryptionHeader::new(
         sender_key,
         recipients,
@@ -28,14 +29,19 @@ pub fn encrypt(sender_key: &SecretKey, recipients: &[PublicKey], message: &[u8])
         &ephemeral_public_key,
         &ephemeral_secret_key,
     );
+
+    // Generate header packet and header hash
     let (header_hash, header_packet) = header.generate_header_packet();
 
+    // Generate per-recipient mac keys
     let recipient_mac_keys: Vec<Vec<u8>> =
         generate_recipient_mac_keys(recipients, &header_hash, &sender_key, &ephemeral_secret_key);
 
+    // Generate the payload packets
     let payload_packets: Vec<PayloadPacket> =
         generate_payload_packets(message, &payload_key, &header_hash, &recipient_mac_keys);
 
+    // Put it all together
     let mut data: Vec<u8> = vec![];
     data.extend(header_packet);
     for payload_packet in payload_packets {
@@ -57,6 +63,8 @@ pub fn generate_recipient_mac_keys(
     for (recipient_index, recipient) in recipients.iter().enumerate() {
         let mut recipient_nonce: Vec<u8> =
             generate_recipient_nonce(header_hash, recipient_index as u64);
+
+        // Encrypt zero bytes with recipients public key and modified nonce
         recipient_nonce[15] &= 0xfe;
         let zero_bytes: Vec<u8> = iter::repeat(0u8).take(32).collect();
         let encrypted1 = box_::seal(
@@ -65,6 +73,8 @@ pub fn generate_recipient_mac_keys(
             &box_::PublicKey::from_slice(recipient).unwrap(),
             &box_::SecretKey::from_slice(sender_key).unwrap(),
         );
+
+        // Encrypt zero bytes with recipients public key and modified nonce
         recipient_nonce[15] |= 0x01;
         let encrypted2 = box_::seal(
             &zero_bytes,
@@ -72,6 +82,8 @@ pub fn generate_recipient_mac_keys(
             &box_::PublicKey::from_slice(recipient).unwrap(),
             &ephemeral_secret_key,
         );
+
+        // Combine parts of the two encrypted tokens and hash that
         let mut encrypted_buf: Vec<u8> = vec![];
         encrypted_buf.copy_from_slice(&encrypted1[32..]);
         encrypted_buf.copy_from_slice(&encrypted2[32..]);
@@ -82,6 +94,7 @@ pub fn generate_recipient_mac_keys(
     recipient_mac_keys
 }
 
+// Generate the recipient nonce from part of the header hash and the recipient index
 fn generate_recipient_nonce(header_hash: &hash::Digest, index: u64) -> Vec<u8> {
     let mut recipient_nonce: Vec<u8> = vec![];
     recipient_nonce.copy_from_slice(&header_hash[..16]);
@@ -96,16 +109,24 @@ fn generate_payload_packets(
     header_hash: &hash::Digest,
     mac_keys: &[Vec<u8>],
 ) -> Vec<PayloadPacket> {
+    // Output
     let mut packets: Vec<PayloadPacket> = vec![];
+
+    // 1 MB max chunk size
     let chunk_size: usize = 1024 * 1024;
     for (index, chunk) in message.chunks(chunk_size).enumerate() {
+        // Encrypt the chunk with the payload key and generated nonce
         let payload_secretbox_nonce: Vec<u8> = generate_payload_secretbox_nonce(index as u64);
         let payload_secretbox: Vec<u8> = secretbox::seal(
             &chunk,
             &secretbox::Nonce::from_slice(&payload_secretbox_nonce).unwrap(),
             &secretbox::Key::from_slice(&payload_key).unwrap(),
         );
+
+        // Flag if this is the final chunk
         let final_flag: bool = chunk.len() < chunk_size;
+
+        // Authenticators for each recipient
         let authenticators: Vec<Vec<u8>> = generate_authenticators(
             header_hash,
             &payload_secretbox_nonce,
@@ -114,6 +135,7 @@ fn generate_payload_packets(
             mac_keys,
         );
 
+        // Create the packet
         packets.push(PayloadPacket {
             final_flag,
             authenticators,
@@ -131,6 +153,7 @@ fn generate_authenticators(
     payload_secretbox: &[u8],
     mac_keys: &[Vec<u8>],
 ) -> Vec<Vec<u8>> {
+    // Authenticator data is the header hash || nonce || final flag || secret box
     let mut authenticator_data: Vec<u8> = vec![];
     authenticator_data.copy_from_slice(&header_hash[..]);
     authenticator_data.copy_from_slice(payload_secretbox_nonce);
@@ -187,6 +210,7 @@ impl EncryptionHeader {
         // Create sender_secretbox
         let sender_secretbox = create_sender_secretbox(&sender, &payload_key);
 
+        // Encrypt payload key for each recipient and (optionally) add their public key
         let mut recipients_list: Vec<EncryptionRecipientPair> = vec![];
         for (index, recipient) in recipients.iter().enumerate() {
             let payload_key_box = encrypt_payload_key_for_recipient(
@@ -201,6 +225,7 @@ impl EncryptionHeader {
             });
         }
 
+        // Return the header
         EncryptionHeader {
             format_name: FORMAT_NAME.to_string(),
             version: VERSION,
@@ -211,6 +236,8 @@ impl EncryptionHeader {
         }
     }
 
+    // Serialize the packet, generate the hash of the serialized packet,
+    // then re-encode the serialized packet as a msgpack bin object
     pub fn generate_header_packet(&self) -> (hash::Digest, Vec<u8>) {
         let mut buf: Vec<u8> = vec![];
         self.serialize(&mut Serializer::new(&mut buf)).unwrap();
