@@ -85,8 +85,8 @@ pub fn generate_recipient_mac_keys(
 
         // Combine parts of the two encrypted tokens and hash that
         let mut encrypted_buf: Vec<u8> = vec![];
-        encrypted_buf.copy_from_slice(&encrypted1[32..]);
-        encrypted_buf.copy_from_slice(&encrypted2[32..]);
+        encrypted_buf.extend_from_slice(&encrypted1[32..]);
+        encrypted_buf.extend_from_slice(&encrypted2[32..]);
         let mac_digest: hash::Digest = hash::sha512::hash(&encrypted_buf);
         recipient_mac_keys.push(mac_digest[..32].to_vec());
     }
@@ -97,7 +97,7 @@ pub fn generate_recipient_mac_keys(
 // Generate the recipient nonce from part of the header hash and the recipient index
 fn generate_recipient_nonce(header_hash: &hash::Digest, index: u64) -> Vec<u8> {
     let mut recipient_nonce: Vec<u8> = vec![];
-    recipient_nonce.copy_from_slice(&header_hash[..16]);
+    recipient_nonce.extend_from_slice(&header_hash[..16]);
     recipient_nonce.write_u64::<BigEndian>(index).unwrap();
 
     recipient_nonce
@@ -155,10 +155,12 @@ fn generate_authenticators(
 ) -> Vec<Vec<u8>> {
     // Authenticator data is the header hash || nonce || final flag || secret box
     let mut authenticator_data: Vec<u8> = vec![];
-    authenticator_data.copy_from_slice(&header_hash[..]);
-    authenticator_data.copy_from_slice(payload_secretbox_nonce);
+    authenticator_data.extend_from_slice(&header_hash[..]);
+    authenticator_data.extend_from_slice(payload_secretbox_nonce);
     authenticator_data.push(final_flag as u8);
-    authenticator_data.copy_from_slice(payload_secretbox);
+    authenticator_data.extend_from_slice(payload_secretbox);
+
+    // Each authenticator is the authenticator data hashed and encrypted with the mac key
     let mut authenticators: Vec<Vec<u8>> = vec![];
     for key in mac_keys {
         authenticators.push(
@@ -175,7 +177,7 @@ fn generate_authenticators(
 
 fn generate_payload_secretbox_nonce(index: u64) -> Vec<u8> {
     let mut nonce: Vec<u8> = vec![];
-    nonce.copy_from_slice(b"saltpack_ploadsb");
+    nonce.extend_from_slice(b"saltpack_ploadsb");
     nonce.write_u64::<BigEndian>(index as u64).unwrap();
 
     nonce
