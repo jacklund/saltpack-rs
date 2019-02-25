@@ -11,6 +11,7 @@ extern crate rmp_serde;
 extern crate serde_repr;
 
 mod encryption;
+mod error;
 mod header;
 mod keys;
 mod signcryption_header;

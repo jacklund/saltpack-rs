@@ -8,13 +8,51 @@ use sodiumoxide::crypto::{auth, box_, hash, secretbox};
 use std::fmt;
 use std::iter;
 
+use crate::error::Error;
 use crate::header::{
-    create_sender_secretbox, encrypt_payload_key_for_recipient, Mode, FORMAT_NAME, VERSION,
+    create_sender_secretbox, decrypt_payload_key_for_recipient, encrypt_payload_key_for_recipient,
+    generate_recipient_nonce, open_sender_secretbox, Header, Mode, FORMAT_NAME, VERSION,
 };
 use crate::keys::{PublicKey, SecretKey};
 use crate::util::generate_random_key;
 
-pub fn encrypt(sender_key: &SecretKey, recipients: &[PublicKey], message: &[u8]) -> Vec<u8> {
+pub fn decrypt(data: &[u8], secret_key: &SecretKey) -> Result<Vec<u8>, Error> {
+    // Decode the header
+    let (header_hash, header) = Header::decode(data)?;
+
+    // Make sure we have the right one
+    let encryption_header: EncryptionHeader = match header {
+        Header::Encryption(encryption_header) => Ok(encryption_header),
+        Header::Signcryption(_) => Err(Error::DecryptionError(
+            "Expected encryption header, got signcryption".to_string(),
+        )),
+        Header::Signing(_) => Err(Error::DecryptionError(
+            "Expected encryption header, got signing".to_string(),
+        )),
+    }?;
+
+    // Validate the expected values
+    encryption_header.validate()?;
+
+    // Decrypt the payload key
+    let payload_key = decrypt_payload_key_for_recipient(
+        &encryption_header.public_key,
+        &secret_key,
+        &encryption_header
+            .recipients_list
+            .iter()
+            .map(|r| r.clone().payload_key_box)
+            .collect::<Vec<Vec<u8>>>(),
+    )?;
+
+    // Decrypt the sender secret box
+    let sender_secret_key =
+        open_sender_secretbox(&encryption_header.sender_secretbox, &payload_key)?;
+
+    unimplemented!()
+}
+
+pub fn encrypt(sender_key: &PublicKey, recipients: &[PublicKey], message: &[u8]) -> Vec<u8> {
     // Generate payload key
     let payload_key: Vec<u8> = generate_random_key();
 
@@ -62,7 +100,7 @@ pub fn generate_recipient_mac_keys(
     let mut recipient_mac_keys: Vec<Vec<u8>> = vec![];
     for (recipient_index, recipient) in recipients.iter().enumerate() {
         let mut recipient_nonce: Vec<u8> =
-            generate_recipient_nonce(header_hash, recipient_index as u64);
+            generate_recipient_mac_nonce(header_hash, recipient_index as u64);
 
         // Encrypt zero bytes with recipients public key and modified nonce
         recipient_nonce[15] &= 0xfe;
@@ -70,8 +108,8 @@ pub fn generate_recipient_mac_keys(
         let encrypted1 = box_::seal(
             &zero_bytes,
             &box_::Nonce::from_slice(&recipient_nonce).unwrap(),
-            &box_::PublicKey::from_slice(recipient).unwrap(),
-            &box_::SecretKey::from_slice(sender_key).unwrap(),
+            &box_::PublicKey::from_slice(recipient.as_ref()).unwrap(),
+            &box_::SecretKey::from_slice(sender_key.as_ref()).unwrap(),
         );
 
         // Encrypt zero bytes with recipients public key and modified nonce
@@ -79,7 +117,7 @@ pub fn generate_recipient_mac_keys(
         let encrypted2 = box_::seal(
             &zero_bytes,
             &box_::Nonce::from_slice(&recipient_nonce).unwrap(),
-            &box_::PublicKey::from_slice(recipient).unwrap(),
+            &box_::PublicKey::from_slice(recipient.as_ref()).unwrap(),
             &ephemeral_secret_key,
         );
 
@@ -95,7 +133,7 @@ pub fn generate_recipient_mac_keys(
 }
 
 // Generate the recipient nonce from part of the header hash and the recipient index
-fn generate_recipient_nonce(header_hash: &hash::Digest, index: u64) -> Vec<u8> {
+fn generate_recipient_mac_nonce(header_hash: &hash::Digest, index: u64) -> Vec<u8> {
     let mut recipient_nonce: Vec<u8> = vec![];
     recipient_nonce.extend_from_slice(&header_hash[..16]);
     recipient_nonce.write_u64::<BigEndian>(index).unwrap();
@@ -185,7 +223,7 @@ fn generate_payload_secretbox_nonce(index: u64) -> Vec<u8> {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct EncryptionRecipientPair {
-    public_key: Option<PublicKey>,
+    public_key: Option<[u8;32]>,
     #[serde(with = "serde_bytes")]
     payload_key_box: Vec<u8>,
 }
@@ -203,7 +241,7 @@ pub struct EncryptionHeader {
 
 impl EncryptionHeader {
     pub fn new(
-        sender: &SecretKey,
+        sender: &PublicKey,
         recipients: &[PublicKey],
         payload_key: &[u8],
         ephemeral_public_key: &box_::PublicKey,
@@ -222,7 +260,7 @@ impl EncryptionHeader {
                 &ephemeral_secret_key,
             );
             recipients_list.push(EncryptionRecipientPair {
-                public_key: Some(*recipient),
+                public_key: Some(recipient.0),
                 payload_key_box,
             });
         }
@@ -236,6 +274,31 @@ impl EncryptionHeader {
             sender_secretbox,
             recipients_list,
         }
+    }
+
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.format_name != FORMAT_NAME {
+            return Err(Error::ValidationError(format!(
+                "Unknown format name '{}'",
+                self.format_name
+            )));
+        }
+
+        if self.version != VERSION {
+            return Err(Error::ValidationError(format!(
+                "Unknown version '{:?}'",
+                self.version
+            )));
+        }
+
+        if self.mode != Mode::EncryptionMode {
+            return Err(Error::ValidationError(format!(
+                "Incorrect mode '{}'",
+                self.mode
+            )));
+        }
+
+        Ok(())
     }
 
     // Serialize the packet, generate the hash of the serialized packet,
@@ -255,7 +318,7 @@ impl fmt::Display for EncryptionHeader {
         writeln!(f, "Header:")?;
         writeln!(f, "  format: {}", self.format_name)?;
         writeln!(f, "  version: {}.{}", self.version[0], self.version[1])?;
-        writeln!(f, "  mode: encryption")?;
+        writeln!(f, "  mode: {}", self.mode)?;
         writeln!(f, "  public key: {}", base64::encode(&self.public_key))?;
         writeln!(
             f,
@@ -270,7 +333,7 @@ impl fmt::Display for EncryptionHeader {
                 if recipient.public_key.is_none() {
                     "nil".to_string()
                 } else {
-                    base64::encode(&recipient.public_key.unwrap())
+                    base64::encode(&recipient.public_key.as_ref().unwrap())
                 }
             )?;
             writeln!(
@@ -295,8 +358,9 @@ struct PayloadPacket {
 mod tests {
     use crate::encryption::{encrypt, EncryptionHeader};
     use crate::header::Header;
-    use crate::keys::{from_binary, PublicKey, SecretKey};
+    use crate::keys::{PublicKey, SecretKey};
     use crate::util::{generate_random_key, read_base64_file};
+    use base64;
     use rmp::decode;
     use rmp_serde::{Deserializer, Serializer};
     use serde::{Deserialize, Serialize};
@@ -305,14 +369,14 @@ mod tests {
 
     #[test]
     fn test_encrypt() {
-        let sender: SecretKey = from_binary(&generate_random_key()).unwrap();
+        let sender: SecretKey = SecretKey::from_slice(&generate_random_key()).unwrap();
         let mut recipients: Vec<PublicKey> = vec![];
         for _ in 0..4 {
-            recipients.push(from_binary(&generate_random_key()).unwrap());
+            recipients.push(PublicKey::from_slice(&generate_random_key()).unwrap());
         }
 
         let ciphertext = encrypt(&sender, &recipients, b"Hello, World!");
-        println!("{:X?}", ciphertext);
+        println!("{}", base64::encode(&ciphertext));
         assert!(false);
     }
 
@@ -324,10 +388,10 @@ mod tests {
         // Generate ephemeral keypair
         let (ephemeral_public_key, ephemeral_secret_key) = box_::gen_keypair();
 
-        let sender: SecretKey = from_binary(&generate_random_key()).unwrap();
+        let sender: SecretKey = SecretKey::from_slice(&generate_random_key()).unwrap();
         let mut recipients: Vec<PublicKey> = vec![];
         for _ in 0..4 {
-            recipients.push(from_binary(&generate_random_key()).unwrap());
+            recipients.push(PublicKey::from_slice(&generate_random_key()).unwrap());
         }
 
         let header: EncryptionHeader = EncryptionHeader::new(
@@ -337,9 +401,11 @@ mod tests {
             &ephemeral_public_key,
             &ephemeral_secret_key,
         );
+        println!("{}", header);
 
         let mut buf: Vec<u8> = vec![];
         header.serialize(&mut Serializer::new(&mut buf)).unwrap();
+        println!("{:x?}", buf);
         let mut de = Deserializer::new(&buf[..]);
         let foo: EncryptionHeader = Deserialize::deserialize(&mut de).unwrap();
         assert_eq!(header, foo);
