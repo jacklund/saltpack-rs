@@ -10,10 +10,14 @@ extern crate rmp;
 extern crate rmp_serde;
 extern crate serde_repr;
 
+#[macro_use]
+mod cryptotypes;
 mod encryption;
 mod error;
+mod handler;
 mod header;
-mod keys;
-mod signcryption_header;
-mod signing_header;
+mod keyring;
+mod process_data;
+mod signcryption;
+mod signing;
 mod util;

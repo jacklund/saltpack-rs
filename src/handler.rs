@@ -1,0 +1,7 @@
+use crate::error::Error;
+
+use std::io::Read;
+
+pub trait Handler {
+    fn process_payload(&self, reader: &mut Read) -> Result<Vec<u8>, Error>;
+}

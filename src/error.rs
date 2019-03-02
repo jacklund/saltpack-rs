@@ -5,6 +5,7 @@ use std::convert::From;
 pub enum Error {
     DecodeError(decode::Error),
     DecryptionError(String),
+    IOError(std::io::Error),
     KeyLengthError(String),
     ValidationError(String),
 }
@@ -12,5 +13,11 @@ pub enum Error {
 impl From<decode::Error> for Error {
     fn from(e: decode::Error) -> Self {
         Error::DecodeError(e)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::IOError(e)
     }
 }

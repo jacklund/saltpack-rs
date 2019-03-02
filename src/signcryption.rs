@@ -1,9 +1,14 @@
 use serde_bytes;
 
+use crate::error::Error;
+use crate::handler::Handler;
 use crate::header::Mode;
+use crate::cryptotypes::{MacKey, PublicKey, SymmetricKey};
+use crate::keyring::KeyRing;
 use base64;
-use sodiumoxide::crypto::box_;
+use sodiumoxide::crypto::{box_, hash};
 use std::fmt;
+use std::io::Read;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SigncryptionRecipientPair {
@@ -22,6 +27,16 @@ pub struct SigncryptionHeader {
     #[serde(with = "serde_bytes")]
     sender_secretbox: Vec<u8>,
     recipients_list: Vec<SigncryptionRecipientPair>,
+}
+
+impl SigncryptionHeader {
+    pub fn get_handler(
+        &self,
+        header_hash: hash::Digest,
+        keyring: &KeyRing,
+    ) -> Result<Box<Handler>, Error> {
+        unimplemented!()
+    }
 }
 
 impl fmt::Display for SigncryptionHeader {
@@ -53,6 +68,36 @@ impl fmt::Display for SigncryptionHeader {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct SigncryptionHandler {
+    pub payload_key: SymmetricKey,
+    pub sender_public_key: PublicKey,
+    pub mac_key: MacKey,
+    pub header_hash: hash::Digest,
+}
+
+impl SigncryptionHandler {
+    pub fn new(
+        payload_key: SymmetricKey,
+        sender_public_key: PublicKey,
+        mac_key: MacKey,
+        header_hash: hash::Digest,
+    ) -> SigncryptionHandler {
+        SigncryptionHandler {
+            payload_key,
+            sender_public_key,
+            mac_key,
+            header_hash,
+        }
+    }
+}
+
+impl Handler for SigncryptionHandler {
+    fn process_payload(&self, reader: &mut Read) -> Result<Vec<u8>, Error> {
+        unimplemented!()
     }
 }
 
