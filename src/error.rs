@@ -3,6 +3,7 @@ use std::convert::From;
 
 #[derive(Debug)]
 pub enum Error {
+    AuthenticationError(String),
     DecodeError(decode::Error),
     DecryptionError(String),
     IOError(std::io::Error),

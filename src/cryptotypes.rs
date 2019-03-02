@@ -94,6 +94,13 @@ impl From<Nonce> for box_::Nonce {
     }
 }
 
+// Convert from Nonce to secretbox::Nonce
+impl From<Nonce> for secretbox::Nonce {
+    fn from(nonce: Nonce) -> secretbox::Nonce {
+        secretbox::Nonce(nonce.0)
+    }
+}
+
 // Index into a Nonce immutably
 impl Index<usize> for Nonce {
     type Output = u8;
@@ -141,6 +148,13 @@ impl From<box_::SecretKey> for SecretKey {
 // Convert from a SymmetricKey to a secretbox::Key
 impl From<&SymmetricKey> for secretbox::Key {
     fn from(key: &SymmetricKey) -> secretbox::Key {
+        secretbox::Key(key.0)
+    }
+}
+
+// Convert from a SymmetricKey to a secretbox::Key
+impl From<SymmetricKey> for secretbox::Key {
+    fn from(key: SymmetricKey) -> secretbox::Key {
         secretbox::Key(key.0)
     }
 }

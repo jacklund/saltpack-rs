@@ -9,7 +9,9 @@ use std::fmt;
 use std::io::Read;
 use std::iter;
 
-use crate::cryptotypes::{Authenticator, FromSlice, MacKey, Nonce, PublicKey, SecretKey, SymmetricKey};
+use crate::cryptotypes::{
+    Authenticator, FromSlice, MacKey, Nonce, PublicKey, SecretKey, SymmetricKey,
+};
 use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::{
@@ -171,7 +173,7 @@ impl EncryptionHeader {
         );
 
         Ok(Box::new(EncryptionHandler::new(
-            recipient_index,
+            recipient_index as usize,
             payload_key,
             sender_public_key,
             mac_key,
@@ -182,7 +184,7 @@ impl EncryptionHeader {
 
 #[derive(Debug)]
 pub struct EncryptionHandler {
-    pub recipient_index: u64,
+    pub recipient_index: usize,
     pub payload_key: SymmetricKey,
     pub sender_public_key: PublicKey,
     pub mac_key: MacKey,
@@ -191,7 +193,7 @@ pub struct EncryptionHandler {
 
 impl EncryptionHandler {
     pub fn new(
-        recipient_index: u64,
+        recipient_index: usize,
         payload_key: SymmetricKey,
         sender_public_key: PublicKey,
         mac_key: MacKey,
@@ -206,10 +208,32 @@ impl EncryptionHandler {
         }
     }
 
-    fn process_packet(&self, packet: &PayloadPacket) -> Result<Vec<u8>, Error> {
-        let payload_secretbox_nonce: Vec<u8> =
-            generate_payload_secretbox_nonce(self.recipient_index);
-        unimplemented!()
+    fn process_packet(
+        &self,
+        packet: &PayloadPacket,
+        packet_index: usize,
+    ) -> Result<Vec<u8>, Error> {
+        let payload_secretbox_nonce: Nonce = generate_payload_secretbox_nonce(self.recipient_index as u64);
+        let authenticator: Authenticator = generate_authenticator(
+            &generate_authenticator_data(
+                &self.header_hash,
+                &payload_secretbox_nonce,
+                packet.final_flag,
+                &packet.payload_secretbox,
+            ),
+            &self.mac_key,
+        );
+
+        if authenticator != packet.authenticators[self.recipient_index] {
+            return Err(Error::AuthenticationError("Authenticators did not match for packet".to_string()));
+        }
+
+        let result = secretbox::open(&packet.payload_secretbox, &payload_secretbox_nonce.into(), &self.payload_key.clone().into());
+        if let Err(_) = result {
+            return Err(Error::DecryptionError("Error opening packet secretbox".to_string()));
+        }
+
+        Ok(result.unwrap())
     }
 }
 
@@ -217,12 +241,14 @@ impl Handler for EncryptionHandler {
     fn process_payload(&self, reader: &mut Read) -> Result<Vec<u8>, Error> {
         let mut ret: Vec<u8> = vec![];
         let mut de = Deserializer::new(reader);
+        let mut packet_index: usize = 0;
         loop {
             let packet: PayloadPacket = Deserialize::deserialize(&mut de)?;
-            ret.extend(self.process_packet(&packet)?);
+            ret.extend(self.process_packet(&packet, packet_index)?);
             if packet.final_flag {
                 break;
             }
+            packet_index += 1;
         }
 
         Ok(ret)
@@ -367,27 +393,6 @@ pub fn generate_encryption_mac_keys(
     recipient_mac_keys
 }
 
-pub fn generate_decryption_mac_keys(
-    recipients: &[PublicKey],
-    header_hash: &hash::Digest,
-    sender_secret_key: &SecretKey,
-    ephemeral_secret_key: &box_::SecretKey,
-) -> Vec<MacKey> {
-    let mut recipient_mac_keys: Vec<MacKey> = vec![];
-    for (recipient_index, recipient) in recipients.iter().enumerate() {
-        recipient_mac_keys.push(generate_recipient_mac_key(
-            header_hash,
-            recipient_index as u64,
-            &recipient.clone().into(),
-            &recipient.clone().into(),
-            &sender_secret_key.clone().into(),
-            &ephemeral_secret_key,
-        ));
-    }
-
-    recipient_mac_keys
-}
-
 // Generate the recipient nonce from part of the header hash and the recipient index
 fn generate_recipient_mac_nonce(header_hash: &hash::Digest, index: u64) -> Nonce {
     let mut recipient_nonce: Vec<u8> = vec![];
@@ -410,10 +415,10 @@ fn generate_payload_packets(
     let chunk_size: usize = 1024 * 1024;
     for (index, chunk) in message.chunks(chunk_size).enumerate() {
         // Encrypt the chunk with the payload key and generated nonce
-        let payload_secretbox_nonce: Vec<u8> = generate_payload_secretbox_nonce(index as u64);
+        let payload_secretbox_nonce: Nonce = generate_payload_secretbox_nonce(index as u64);
         let payload_secretbox: Vec<u8> = secretbox::seal(
             &chunk,
-            &secretbox::Nonce::from_slice(&payload_secretbox_nonce).unwrap(),
+            &payload_secretbox_nonce.clone().into(),
             &payload_key.into(),
         );
 
@@ -458,17 +463,18 @@ fn generate_authenticator_data(
 
 fn generate_authenticators(
     header_hash: &hash::Digest,
-    payload_secretbox_nonce: &[u8],
+    payload_secretbox_nonce: &Nonce,
     final_flag: bool,
     payload_secretbox: &[u8],
     mac_keys: &[MacKey],
 ) -> Vec<Authenticator> {
     // Authenticator data is the header hash || nonce || final flag || secret box
-    let mut authenticator_data: Vec<u8> = vec![];
-    authenticator_data.extend_from_slice(&header_hash[..]);
-    authenticator_data.extend_from_slice(payload_secretbox_nonce);
-    authenticator_data.push(final_flag as u8);
-    authenticator_data.extend_from_slice(payload_secretbox);
+    let authenticator_data: Vec<u8> = generate_authenticator_data(
+        header_hash,
+        payload_secretbox_nonce,
+        final_flag,
+        payload_secretbox,
+    );
 
     // Each authenticator is the authenticator data hashed and encrypted with the mac key
     let mut authenticators: Vec<Authenticator> = vec![];
@@ -487,12 +493,12 @@ fn generate_authenticator(authenticator_data: &[u8], key: &MacKey) -> Authentica
     .into()
 }
 
-fn generate_payload_secretbox_nonce(index: u64) -> Vec<u8> {
+fn generate_payload_secretbox_nonce(index: u64) -> Nonce {
     let mut nonce: Vec<u8> = vec![];
     nonce.extend_from_slice(b"saltpack_ploadsb");
     nonce.write_u64::<BigEndian>(index as u64).unwrap();
 
-    nonce
+    Nonce::from_slice(&nonce).unwrap()
 }
 
 impl fmt::Display for EncryptionHeader {
@@ -531,9 +537,9 @@ impl fmt::Display for EncryptionHeader {
 
 #[cfg(test)]
 mod tests {
+    use crate::cryptotypes::{PublicKey, SecretKey, SymmetricKey};
     use crate::encryption::{encrypt, EncryptionHeader};
     use crate::header::Header;
-    use crate::cryptotypes::{PublicKey, SecretKey, SymmetricKey};
     use crate::util::{generate_keypair, generate_random_key, read_base64_file};
     use base64;
     use rmp::decode;
@@ -550,7 +556,12 @@ mod tests {
             recipients.push(generate_random_key());
         }
 
-        let ciphertext = encrypt(&sender_secret_key, &sender_public_key, &recipients, b"Hello, World!");
+        let ciphertext = encrypt(
+            &sender_secret_key,
+            &sender_public_key,
+            &recipients,
+            b"Hello, World!",
+        );
         println!("{}", base64::encode(&ciphertext));
         assert!(false);
     }
