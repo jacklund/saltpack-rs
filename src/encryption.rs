@@ -537,16 +537,20 @@ impl fmt::Display for EncryptionHeader {
 
 #[cfg(test)]
 mod tests {
-    use crate::cryptotypes::{PublicKey, SecretKey, SymmetricKey};
+    use crate::cryptotypes::{FromSlice, PublicKey, SecretKey, SymmetricKey};
     use crate::encryption::{encrypt, EncryptionHeader};
     use crate::header::Header;
+    use crate::keyring::KeyRing;
+    use crate::process_data::process_data;
     use crate::util::{generate_keypair, generate_random_key, read_base64_file};
     use base64;
+    use hex;
     use rmp::decode;
     use rmp_serde::{Deserializer, Serializer};
     use serde::{Deserialize, Serialize};
-    use sodiumoxide::crypto::box_;
+    use sodiumoxide::crypto::{box_, scalarmult};
     use std::io::Cursor;
+    use std::str;
 
     #[test]
     fn test_encrypt() {
@@ -563,6 +567,30 @@ mod tests {
             b"Hello, World!",
         );
         println!("{}", base64::encode(&ciphertext));
+        assert!(false);
+    }
+
+    fn get_public_key(secret_key: &SecretKey) -> PublicKey {
+        scalarmult::scalarmult_base(&secret_key.into()).into()
+    }
+
+    #[test]
+    fn test_decrypt() {
+        let mut data: Vec<u8> = read_base64_file("fixtures/decrypt.txt");
+        let secret_key_strings = [
+            "16c22cb65728ded9214c8e4525decc20f6ad95fd43a503deaecdfbcd79d39d15",
+            "fceb2cb2c77b22d47a779461c7a963a11759a3f98a437d542e3cdde5d0c9bea6",
+            "293d2a95a4f6ea3ed0c5213bd9b28b28ecff5c023ad488025e2a789abb773aa5",
+        ];
+        let secret_keys = secret_key_strings.iter().map(|sks| hex::decode(sks).unwrap());
+        let mut keyring: KeyRing = KeyRing::new();
+        for secret_key_bytes in secret_keys {
+            let secret_key: SecretKey = SecretKey::from_slice(&secret_key_bytes).unwrap();
+            keyring.add_encryption_keys(get_public_key(&secret_key), secret_key);
+        }
+
+        let plaintext = process_data(&mut &data[..], &keyring).unwrap();
+        println!("{}", str::from_utf8(&plaintext).unwrap());
         assert!(false);
     }
 

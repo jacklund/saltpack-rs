@@ -1,5 +1,5 @@
 use crate::error::Error;
-use sodiumoxide::crypto::{auth, box_, secretbox};
+use sodiumoxide::crypto::{auth, box_, scalarmult, secretbox};
 use std::convert::From;
 use std::ops::{Index, IndexMut};
 
@@ -60,6 +60,12 @@ cryptotype!(Authenticator, 32);
 
 // Public Key
 cryptotype!(PublicKey, 32);
+
+impl From<scalarmult::GroupElement> for PublicKey {
+    fn from(ge: scalarmult::GroupElement) -> PublicKey {
+        PublicKey(ge.0)
+    }
+}
 
 // Secret Key
 cryptotype!(SecretKey, 32);
@@ -142,6 +148,18 @@ impl From<SecretKey> for box_::SecretKey {
 impl From<box_::SecretKey> for SecretKey {
     fn from(key: box_::SecretKey) -> SecretKey {
         SecretKey(key.0)
+    }
+}
+
+impl From<SecretKey> for scalarmult::Scalar {
+    fn from(sk: SecretKey) -> scalarmult::Scalar {
+        scalarmult::Scalar(sk.0)
+    }
+}
+
+impl From<&SecretKey> for scalarmult::Scalar {
+    fn from(sk: &SecretKey) -> scalarmult::Scalar {
+        scalarmult::Scalar(sk.0)
     }
 }
 

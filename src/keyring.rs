@@ -7,6 +7,17 @@ pub struct KeyRing {
 }
 
 impl KeyRing {
+    pub fn new() -> Self {
+        KeyRing {
+            encryption_keys: HashMap::new(),
+            signing_keys: HashMap::new(),
+        }
+    }
+
+    pub fn add_encryption_keys(&mut self, public_key: PublicKey, secret_key: SecretKey) {
+        self.encryption_keys.insert(public_key, secret_key);
+    }
+
     pub fn find_encryption_key(&self, public_key: &PublicKey) -> Option<&SecretKey> {
         self.encryption_keys.get(public_key)
     }
