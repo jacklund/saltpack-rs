@@ -20,7 +20,7 @@ use std::io::Read;
 pub const FORMAT_NAME: &str = "saltpack";
 pub const VERSION: Version = Version(2, 0);
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Version(u32, u32);
 
 impl fmt::Display for Version {
@@ -29,7 +29,7 @@ impl fmt::Display for Version {
     }
 }
 
-#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug)]
+#[derive(Clone, Serialize_repr, Deserialize_repr, PartialEq, Debug)]
 #[repr(u8)]
 pub enum Mode {
     EncryptionMode = 0,
@@ -51,7 +51,7 @@ impl fmt::Display for Mode {
     }
 }
 
-const RECIPIENT_NONCE_PREFIX: &[u8] = b"saltpack_recipsb";
+pub const RECIPIENT_NONCE_PREFIX: &[u8] = b"saltpack_recipsb";
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
@@ -84,6 +84,41 @@ impl Header {
     }
 }
 
+pub trait HeaderBoilerplate {
+    fn validate(&self) -> Result<(), Error>;
+}
+
+macro_rules! boilerplate {
+    ( $name:ident, $mode:ident ) => {
+        impl HeaderBoilerplate for $name {
+            fn validate(&self) -> Result<(), Error> {
+                if self.format_name != FORMAT_NAME {
+                    return Err(Error::ValidationError(format!(
+                        "Unknown format name '{}'",
+                        self.format_name
+                    )));
+                }
+
+                if self.version != VERSION {
+                    return Err(Error::ValidationError(format!(
+                        "Unknown version '{}'",
+                        self.version
+                    )));
+                }
+
+                if self.mode != Mode::$mode {
+                    return Err(Error::ValidationError(format!(
+                        "Incorrect mode '{}'",
+                        self.mode
+                    )));
+                }
+
+                Ok(())
+            }
+        }
+    }
+}
+
 impl fmt::Display for Header {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -92,77 +127,4 @@ impl fmt::Display for Header {
             Header::Signcryption(hdr) => hdr.fmt(f),
         }
     }
-}
-
-pub fn create_sender_secretbox(sender: &PublicKey, payload_key: &SymmetricKey) -> Vec<u8> {
-    let nonce: secretbox::Nonce =
-        secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap();
-    secretbox::seal(sender.as_ref(), &nonce, &payload_key.into())
-}
-
-pub fn open_sender_secretbox(
-    secretbox: &[u8],
-    payload_key: &SymmetricKey,
-) -> Result<PublicKey, Error> {
-    let nonce: secretbox::Nonce =
-        secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap();
-    if let Ok(sender_public_key) =
-        secretbox::open(secretbox, &nonce, &payload_key.into())
-    {
-        return Ok(PublicKey::from_slice(&sender_public_key)?);
-    }
-
-    Err(Error::DecryptionError(
-        "Unable to decrypt sender secret box with payload key".to_string(),
-    ))
-}
-
-pub fn generate_recipient_nonce(recipient_index: u64) -> Nonce {
-    let mut recipient_nonce = RECIPIENT_NONCE_PREFIX.to_vec();
-    recipient_nonce
-        .write_u64::<BigEndian>(recipient_index)
-        .unwrap();
-
-    Nonce::from_slice(&recipient_nonce).unwrap()
-}
-
-pub fn decrypt_payload_key_for_recipient(
-    public_key: &box_::PublicKey,
-    secret_key: &SecretKey,
-    payload_key_box_list: &[Vec<u8>],
-) -> Option<Vec<u8>> {
-    // Precompute the shared secret
-    let key: box_::PrecomputedKey = box_::precompute(
-        &public_key,
-        &secret_key.clone().into(),
-    );
-
-    // Try to open each payload key box in turn
-    for (recipient_index, payload_key_box) in payload_key_box_list.iter().enumerate() {
-        let nonce = generate_recipient_nonce(recipient_index as u64);
-        if let Ok(payload_key) = box_::open_precomputed(
-            &payload_key_box,
-            &nonce.into(),
-            &key,
-        ) {
-            return Some(payload_key);
-        }
-    }
-
-    None
-}
-
-pub fn encrypt_payload_key_for_recipient(
-    recipient: &PublicKey,
-    recipient_index: u64,
-    payload_key: &SymmetricKey,
-    secret_key: &box_::SecretKey,
-) -> Vec<u8> {
-    let recipient_nonce = generate_recipient_nonce(recipient_index);
-    box_::seal(
-        &payload_key.bytes(),
-        &recipient_nonce.into(),
-        &recipient.clone().into(),
-        &secret_key,
-    )
 }

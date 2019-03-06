@@ -15,8 +15,7 @@ use crate::cryptotypes::{
 use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::{
-    create_sender_secretbox, decrypt_payload_key_for_recipient, encrypt_payload_key_for_recipient,
-    generate_recipient_nonce, open_sender_secretbox, Header, Mode, FORMAT_NAME, VERSION, Version,
+    FORMAT_NAME, Header, HeaderBoilerplate, Mode, RECIPIENT_NONCE_PREFIX, VERSION, Version,
 };
 use crate::keyring::KeyRing;
 use crate::util::generate_random_key;
@@ -38,6 +37,9 @@ pub struct EncryptionHeader {
     pub sender_secretbox: Vec<u8>,
     pub recipients_list: Vec<EncryptionRecipientPair>,
 }
+
+// Sets up the validation of the "boilerplate" first three fields
+boilerplate!(EncryptionHeader, EncryptionMode);
 
 impl EncryptionHeader {
     pub fn new(
@@ -74,31 +76,6 @@ impl EncryptionHeader {
             sender_secretbox,
             recipients_list,
         }
-    }
-
-    pub fn validate(&self) -> Result<(), Error> {
-        if self.format_name != FORMAT_NAME {
-            return Err(Error::ValidationError(format!(
-                "Unknown format name '{}'",
-                self.format_name
-            )));
-        }
-
-        if self.version != VERSION {
-            return Err(Error::ValidationError(format!(
-                "Unknown version '{:?}'",
-                self.version
-            )));
-        }
-
-        if self.mode != Mode::EncryptionMode {
-            return Err(Error::ValidationError(format!(
-                "Incorrect mode '{}'",
-                self.mode
-            )));
-        }
-
-        Ok(())
     }
 
     // Serialize the packet, generate the hash of the serialized packet,
@@ -499,6 +476,79 @@ fn generate_payload_secretbox_nonce(index: u64) -> Nonce {
     nonce.write_u64::<BigEndian>(index as u64).unwrap();
 
     Nonce::from_slice(&nonce).unwrap()
+}
+
+pub fn create_sender_secretbox(sender: &PublicKey, payload_key: &SymmetricKey) -> Vec<u8> {
+    let nonce: secretbox::Nonce =
+        secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap();
+    secretbox::seal(sender.as_ref(), &nonce, &payload_key.into())
+}
+
+pub fn open_sender_secretbox(
+    secretbox: &[u8],
+    payload_key: &SymmetricKey,
+) -> Result<PublicKey, Error> {
+    let nonce: secretbox::Nonce =
+        secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap();
+    if let Ok(sender_public_key) =
+        secretbox::open(secretbox, &nonce, &payload_key.into())
+    {
+        return Ok(PublicKey::from_slice(&sender_public_key)?);
+    }
+
+    Err(Error::DecryptionError(
+        "Unable to decrypt sender secret box with payload key".to_string(),
+    ))
+}
+
+pub fn generate_recipient_nonce(recipient_index: u64) -> Nonce {
+    let mut recipient_nonce = RECIPIENT_NONCE_PREFIX.to_vec();
+    recipient_nonce
+        .write_u64::<BigEndian>(recipient_index)
+        .unwrap();
+
+    Nonce::from_slice(&recipient_nonce).unwrap()
+}
+
+pub fn decrypt_payload_key_for_recipient(
+    public_key: &box_::PublicKey,
+    secret_key: &SecretKey,
+    payload_key_box_list: &[Vec<u8>],
+) -> Option<Vec<u8>> {
+    // Precompute the shared secret
+    let key: box_::PrecomputedKey = box_::precompute(
+        &public_key,
+        &secret_key.clone().into(),
+    );
+
+    // Try to open each payload key box in turn
+    for (recipient_index, payload_key_box) in payload_key_box_list.iter().enumerate() {
+        let nonce = generate_recipient_nonce(recipient_index as u64);
+        if let Ok(payload_key) = box_::open_precomputed(
+            &payload_key_box,
+            &nonce.into(),
+            &key,
+        ) {
+            return Some(payload_key);
+        }
+    }
+
+    None
+}
+
+pub fn encrypt_payload_key_for_recipient(
+    recipient: &PublicKey,
+    recipient_index: u64,
+    payload_key: &SymmetricKey,
+    secret_key: &box_::SecretKey,
+) -> Vec<u8> {
+    let recipient_nonce = generate_recipient_nonce(recipient_index);
+    box_::seal(
+        &payload_key.bytes(),
+        &recipient_nonce.into(),
+        &recipient.clone().into(),
+        &secret_key,
+    )
 }
 
 impl fmt::Display for EncryptionHeader {

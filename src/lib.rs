@@ -13,12 +13,12 @@ extern crate rmp_serde;
 extern crate serde_repr;
 
 mod base62;
-#[macro_use]
 mod cryptotypes;
+#[macro_use]
+mod header;
 mod encryption;
 mod error;
 mod handler;
-mod header;
 mod keyring;
 mod process_data;
 mod signcryption;
