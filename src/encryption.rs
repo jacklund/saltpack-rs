@@ -16,7 +16,7 @@ use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::{
     create_sender_secretbox, decrypt_payload_key_for_recipient, encrypt_payload_key_for_recipient,
-    generate_recipient_nonce, open_sender_secretbox, Header, Mode, FORMAT_NAME, VERSION,
+    generate_recipient_nonce, open_sender_secretbox, Header, Mode, FORMAT_NAME, VERSION, Version,
 };
 use crate::keyring::KeyRing;
 use crate::util::generate_random_key;
@@ -31,7 +31,7 @@ pub struct EncryptionRecipientPair {
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct EncryptionHeader {
     pub format_name: String,
-    pub version: [u32; 2],
+    pub version: Version,
     pub mode: Mode,
     pub public_key: box_::PublicKey,
     #[serde(with = "serde_bytes")]
@@ -505,7 +505,7 @@ impl fmt::Display for EncryptionHeader {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "Header:")?;
         writeln!(f, "  format: {}", self.format_name)?;
-        writeln!(f, "  version: {}.{}", self.version[0], self.version[1])?;
+        writeln!(f, "  version: {}", self.version)?;
         writeln!(f, "  mode: {}", self.mode)?;
         writeln!(f, "  public key: {}", base64::encode(&self.public_key))?;
         writeln!(

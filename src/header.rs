@@ -18,7 +18,16 @@ use std::fmt;
 use std::io::Read;
 
 pub const FORMAT_NAME: &str = "saltpack";
-pub const VERSION: [u32; 2] = [2, 0];
+pub const VERSION: Version = Version(2, 0);
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub struct Version(u32, u32);
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "{}.{}", self.0, self.1)
+    }
+}
 
 #[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug)]
 #[repr(u8)]
