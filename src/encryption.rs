@@ -4,25 +4,24 @@ use rmp::encode;
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
 use serde_bytes;
+use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
+use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
 use sodiumoxide::crypto::{auth, box_, hash, secretbox};
 use std::fmt;
 use std::io::Read;
-use std::iter;
 
-use crate::cryptotypes::{
-    Authenticator, FromSlice, MacKey, Nonce, PublicKey, SecretKey, SymmetricKey,
-};
+use crate::cryptotypes::{Authenticator, FromSlice, MacKey, Nonce};
 use crate::error::Error;
 use crate::handler::Handler;
-use crate::header::{
-    FORMAT_NAME, Header, HeaderBoilerplate, Mode, RECIPIENT_NONCE_PREFIX, VERSION, Version,
-};
+use crate::header::{Mode, Version, FORMAT_NAME, VERSION};
 use crate::keyring::KeyRing;
-use crate::util::generate_random_key;
+use crate::util::{
+    cryptobox_zero_bytes, generate_keypair, generate_random_symmetric_key, generate_recipient_nonce,
+};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct EncryptionRecipientPair {
-    public_key: Option<[u8; 32]>,
+    public_key: Option<Vec<u8>>,
     #[serde(with = "serde_bytes")]
     payload_key_box: Vec<u8>,
 }
@@ -32,22 +31,19 @@ pub struct EncryptionHeader {
     pub format_name: String,
     pub version: Version,
     pub mode: Mode,
-    pub public_key: box_::PublicKey,
+    pub public_key: PublicKey,
     #[serde(with = "serde_bytes")]
     pub sender_secretbox: Vec<u8>,
     pub recipients_list: Vec<EncryptionRecipientPair>,
 }
 
-// Sets up the validation of the "boilerplate" first three fields
-boilerplate!(EncryptionHeader, EncryptionMode);
-
-impl EncryptionHeader {
+impl  EncryptionHeader {
     pub fn new(
         sender: &PublicKey,
         recipients: &[PublicKey],
         payload_key: &SymmetricKey,
-        ephemeral_public_key: &box_::PublicKey,
-        ephemeral_secret_key: &box_::SecretKey,
+        ephemeral_public_key: &PublicKey,
+        ephemeral_secret_key: &SecretKey,
     ) -> Self {
         // Create sender_secretbox
         let sender_secretbox = create_sender_secretbox(&sender, &payload_key);
@@ -62,7 +58,7 @@ impl EncryptionHeader {
                 &ephemeral_secret_key,
             );
             recipients_list.push(EncryptionRecipientPair {
-                public_key: Some(recipient.0),
+                public_key: Some(recipient.0.to_vec().into()),
                 payload_key_box,
             });
         }
@@ -71,8 +67,8 @@ impl EncryptionHeader {
         EncryptionHeader {
             format_name: FORMAT_NAME.to_string(),
             version: VERSION,
-            mode: Mode::EncryptionMode,
-            public_key: *ephemeral_public_key,
+            mode: Mode::Encryption,
+            public_key: ephemeral_public_key.clone(),
             sender_secretbox,
             recipients_list,
         }
@@ -89,24 +85,30 @@ impl EncryptionHeader {
         (digest, packet)
     }
 
+    pub fn decode(buf: &[u8]) -> Result<Self, Error> {
+        let mut de = Deserializer::new(buf);
+        Ok(Deserialize::deserialize(&mut de)?)
+    }
+
     pub fn get_handler(
         &self,
         header_hash: hash::Digest,
         keyring: &KeyRing,
     ) -> Result<Box<Handler>, Error> {
         // Validate the expected values
-        self.validate()?;
+        // self.validate()?;
 
         // Are any of our recipients anonymous?
-        let has_anonymous = self.recipients_list.iter().any(|r| r.public_key.is_none());
+        // let has_anonymous = self.recipients_list.iter().any(|r| r.public_key.is_none());
+        let has_anonymous = false;
 
         // Get a list of any secret keys of known recipients we
         // have in our keyring
         let mut secret_key_list: Vec<&SecretKey> = self
             .recipients_list
             .iter()
-            .filter_map(|r| r.public_key)
-            .map(|p| keyring.find_encryption_key(&PublicKey(p)))
+            .filter_map(|r| r.public_key.clone())
+            .map(|p| keyring.find_encryption_key(&PublicKey::from_slice(&p).unwrap()))
             .filter(|&s| s.is_some())
             .map(|s| s.unwrap())
             .collect();
@@ -190,7 +192,8 @@ impl EncryptionHandler {
         packet: &PayloadPacket,
         packet_index: usize,
     ) -> Result<Vec<u8>, Error> {
-        let payload_secretbox_nonce: Nonce = generate_payload_secretbox_nonce(self.recipient_index as u64);
+        let payload_secretbox_nonce: Nonce =
+            generate_payload_secretbox_nonce(self.recipient_index as u64);
         let authenticator: Authenticator = generate_authenticator(
             &generate_authenticator_data(
                 &self.header_hash,
@@ -202,12 +205,20 @@ impl EncryptionHandler {
         );
 
         if authenticator != packet.authenticators[self.recipient_index] {
-            return Err(Error::AuthenticationError("Authenticators did not match for packet".to_string()));
+            return Err(Error::AuthenticationError(
+                "Authenticators did not match for packet".to_string(),
+            ));
         }
 
-        let result = secretbox::open(&packet.payload_secretbox, &payload_secretbox_nonce.into(), &self.payload_key.clone().into());
+        let result = secretbox::open(
+            &packet.payload_secretbox,
+            &payload_secretbox_nonce.into(),
+            &self.payload_key.clone().into(),
+        );
         if let Err(_) = result {
-            return Err(Error::DecryptionError("Error opening packet secretbox".to_string()));
+            return Err(Error::DecryptionError(
+                "Error opening packet secretbox".to_string(),
+            ));
         }
 
         Ok(result.unwrap())
@@ -241,7 +252,7 @@ struct PayloadPacket {
 
 fn try_decrypt_payload_key<'a>(
     secret_key_list: &[&'a SecretKey],
-    ephemeral_public_key: &box_::PublicKey,
+    ephemeral_public_key: &PublicKey,
     key_boxes: &[Vec<u8>],
 ) -> Option<(u64, &'a SecretKey, SymmetricKey)> {
     for secret_key in secret_key_list {
@@ -271,10 +282,10 @@ pub fn encrypt(
     message: &[u8],
 ) -> Vec<u8> {
     // Generate payload key
-    let payload_key: SymmetricKey = generate_random_key();
+    let payload_key: SymmetricKey = generate_random_symmetric_key();
 
     // Generate ephemeral keypair
-    let (ephemeral_public_key, ephemeral_secret_key) = box_::gen_keypair();
+    let (ephemeral_public_key, ephemeral_secret_key) = generate_keypair();
 
     // Generate encryption header
     let header: EncryptionHeader = EncryptionHeader::new(
@@ -312,22 +323,13 @@ pub fn encrypt(
     data
 }
 
-pub fn cryptobox_zero_bytes(
-    nonce: &box_::Nonce,
-    public_key: &box_::PublicKey,
-    secret_key: &box_::SecretKey,
-) -> Vec<u8> {
-    let zero_bytes: Vec<u8> = iter::repeat(0u8).take(32).collect();
-    box_::seal(&zero_bytes, nonce, public_key, secret_key)
-}
-
 fn generate_recipient_mac_key(
     header_hash: &hash::Digest,
     recipient_index: u64,
-    public_key1: &box_::PublicKey,
-    public_key2: &box_::PublicKey,
-    secret_key1: &box_::SecretKey,
-    secret_key2: &box_::SecretKey,
+    public_key1: &PublicKey,
+    public_key2: &PublicKey,
+    secret_key1: &SecretKey,
+    secret_key2: &SecretKey,
 ) -> MacKey {
     let mut recipient_nonce: Nonce =
         generate_recipient_mac_nonce(header_hash, recipient_index as u64);
@@ -353,7 +355,7 @@ pub fn generate_encryption_mac_keys(
     recipients: &[PublicKey],
     header_hash: &hash::Digest,
     sender_secret_key: &SecretKey,
-    ephemeral_secret_key: &box_::SecretKey,
+    ephemeral_secret_key: &SecretKey,
 ) -> Vec<MacKey> {
     let mut recipient_mac_keys: Vec<MacKey> = vec![];
     for (recipient_index, recipient) in recipients.iter().enumerate() {
@@ -396,7 +398,7 @@ fn generate_payload_packets(
         let payload_secretbox: Vec<u8> = secretbox::seal(
             &chunk,
             &payload_secretbox_nonce.clone().into(),
-            &payload_key.into(),
+            &payload_key,
         );
 
         // Flag if this is the final chunk
@@ -481,7 +483,7 @@ fn generate_payload_secretbox_nonce(index: u64) -> Nonce {
 pub fn create_sender_secretbox(sender: &PublicKey, payload_key: &SymmetricKey) -> Vec<u8> {
     let nonce: secretbox::Nonce =
         secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap();
-    secretbox::seal(sender.as_ref(), &nonce, &payload_key.into())
+    secretbox::seal(sender.as_ref(), &nonce, &payload_key)
 }
 
 pub fn open_sender_secretbox(
@@ -490,24 +492,17 @@ pub fn open_sender_secretbox(
 ) -> Result<PublicKey, Error> {
     let nonce: secretbox::Nonce =
         secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap();
-    if let Ok(sender_public_key) =
-        secretbox::open(secretbox, &nonce, &payload_key.into())
-    {
-        return Ok(PublicKey::from_slice(&sender_public_key)?);
+    if let Ok(sender_public_key) = secretbox::open(secretbox, &nonce, &payload_key) {
+        return Ok(
+            PublicKey::from_slice(&sender_public_key).ok_or(Error::DecryptionError(
+                "Error decrypting sender secretbox".to_string(),
+            ))?,
+        );
     }
 
     Err(Error::DecryptionError(
         "Unable to decrypt sender secret box with payload key".to_string(),
     ))
-}
-
-pub fn generate_recipient_nonce(recipient_index: u64) -> Nonce {
-    let mut recipient_nonce = RECIPIENT_NONCE_PREFIX.to_vec();
-    recipient_nonce
-        .write_u64::<BigEndian>(recipient_index)
-        .unwrap();
-
-    Nonce::from_slice(&recipient_nonce).unwrap()
 }
 
 pub fn decrypt_payload_key_for_recipient(
@@ -516,19 +511,12 @@ pub fn decrypt_payload_key_for_recipient(
     payload_key_box_list: &[Vec<u8>],
 ) -> Option<Vec<u8>> {
     // Precompute the shared secret
-    let key: box_::PrecomputedKey = box_::precompute(
-        &public_key,
-        &secret_key.clone().into(),
-    );
+    let key: box_::PrecomputedKey = box_::precompute(&public_key, &secret_key.clone().into());
 
     // Try to open each payload key box in turn
     for (recipient_index, payload_key_box) in payload_key_box_list.iter().enumerate() {
         let nonce = generate_recipient_nonce(recipient_index as u64);
-        if let Ok(payload_key) = box_::open_precomputed(
-            &payload_key_box,
-            &nonce.into(),
-            &key,
-        ) {
+        if let Ok(payload_key) = box_::open_precomputed(&payload_key_box, &nonce.into(), &key) {
             return Some(payload_key);
         }
     }
@@ -540,18 +528,18 @@ pub fn encrypt_payload_key_for_recipient(
     recipient: &PublicKey,
     recipient_index: u64,
     payload_key: &SymmetricKey,
-    secret_key: &box_::SecretKey,
+    secret_key: &SecretKey,
 ) -> Vec<u8> {
     let recipient_nonce = generate_recipient_nonce(recipient_index);
     box_::seal(
-        &payload_key.bytes(),
+        &payload_key.0, // TODO: UGLY!!!
         &recipient_nonce.into(),
         &recipient.clone().into(),
         &secret_key,
     )
 }
 
-impl fmt::Display for EncryptionHeader {
+impl  fmt::Display for EncryptionHeader {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "Header:")?;
         writeln!(f, "  format: {}", self.format_name)?;
@@ -587,17 +575,22 @@ impl fmt::Display for EncryptionHeader {
 
 #[cfg(test)]
 mod tests {
-    use crate::cryptotypes::{FromSlice, PublicKey, SecretKey, SymmetricKey};
     use crate::encryption::{encrypt, EncryptionHeader};
+    use crate::error::Error;
     use crate::header::Header;
     use crate::keyring::KeyRing;
     use crate::process_data::process_data;
-    use crate::util::{generate_keypair, generate_random_key, read_base64_file};
+    use crate::util::{
+        generate_keypair, generate_random_public_key, generate_random_symmetric_key,
+        read_base64_file,
+    };
     use base64;
     use hex;
     use rmp::decode;
     use rmp_serde::{Deserializer, Serializer};
     use serde::{Deserialize, Serialize};
+    use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
+    use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
     use sodiumoxide::crypto::{box_, scalarmult};
     use std::io::Cursor;
     use std::str;
@@ -607,7 +600,7 @@ mod tests {
         let (sender_public_key, sender_secret_key) = generate_keypair();
         let mut recipients: Vec<PublicKey> = vec![];
         for _ in 0..4 {
-            recipients.push(generate_random_key());
+            recipients.push(generate_random_public_key());
         }
 
         let ciphertext = encrypt(
@@ -620,8 +613,8 @@ mod tests {
         assert!(false);
     }
 
-    fn get_public_key(secret_key: &SecretKey) -> PublicKey {
-        scalarmult::scalarmult_base(&secret_key.into()).into()
+    fn mock_key_resolver(identifiers: &Vec<Vec<u8>>) -> Result<Vec<Option<SymmetricKey>>, Error> {
+        Ok(vec![])
     }
 
     #[test]
@@ -632,14 +625,16 @@ mod tests {
             "fceb2cb2c77b22d47a779461c7a963a11759a3f98a437d542e3cdde5d0c9bea6",
             "293d2a95a4f6ea3ed0c5213bd9b28b28ecff5c023ad488025e2a789abb773aa5",
         ];
-        let secret_keys = secret_key_strings.iter().map(|sks| hex::decode(sks).unwrap());
+        let secret_keys = secret_key_strings
+            .iter()
+            .map(|sks| hex::decode(sks).unwrap());
         let mut keyring: KeyRing = KeyRing::new();
         for secret_key_bytes in secret_keys {
             let secret_key: SecretKey = SecretKey::from_slice(&secret_key_bytes).unwrap();
-            keyring.add_encryption_keys(get_public_key(&secret_key), secret_key);
+            keyring.add_encryption_keys(secret_key.public_key(), secret_key);
         }
 
-        let plaintext = process_data(&mut &data[..], &keyring).unwrap();
+        let plaintext = process_data(&mut &data[..], &keyring, mock_key_resolver).unwrap();
         println!("{}", str::from_utf8(&plaintext).unwrap());
         assert!(false);
     }
@@ -647,15 +642,15 @@ mod tests {
     #[test]
     fn test_serialize_deserialize_encryption_header() {
         // Generate payload key
-        let payload_key: SymmetricKey = generate_random_key();
+        let payload_key: SymmetricKey = generate_random_symmetric_key();
 
         // Generate ephemeral keypair
-        let (ephemeral_public_key, ephemeral_secret_key) = box_::gen_keypair();
+        let (ephemeral_public_key, ephemeral_secret_key) = generate_keypair();
 
-        let sender: PublicKey = generate_random_key();
+        let sender: PublicKey = generate_random_public_key();
         let mut recipients: Vec<PublicKey> = vec![];
         for _ in 0..4 {
-            recipients.push(generate_random_key());
+            recipients.push(generate_random_public_key());
         }
 
         let header: EncryptionHeader = EncryptionHeader::new(
@@ -678,7 +673,6 @@ mod tests {
     #[test]
     fn test_read_encryption_header() {
         let data: Vec<u8> = read_base64_file("fixtures/encryption.txt");
-        println!("Data: {:x?}", data);
         let (_header_hash, header) = Header::decode(&mut data.as_slice()).unwrap();
         if let Header::Encryption(encryption_header) = header {
             assert_eq!(14, encryption_header.recipients_list.len());

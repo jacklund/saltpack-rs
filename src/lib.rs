@@ -3,13 +3,14 @@ extern crate base_x;
 extern crate byteorder;
 extern crate hex;
 extern crate rand;
+extern crate rmp;
+extern crate rmpv;
+extern crate rmp_serde;
 extern crate serde;
 extern crate serde_bytes;
 extern crate sodiumoxide;
 #[macro_use]
 extern crate serde_derive;
-extern crate rmp;
-extern crate rmp_serde;
 extern crate serde_repr;
 
 mod base62;

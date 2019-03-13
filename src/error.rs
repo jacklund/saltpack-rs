@@ -1,21 +1,28 @@
 use base_x;
-use rmp_serde::decode;
+use rmp::decode;
 use std::convert::From;
 
 #[derive(Debug)]
 pub enum Error {
     AuthenticationError(String),
     Base62DecodeError(String),
-    DecodeError(decode::Error),
+    DecodeError(Box<std::error::Error>),
     DecryptionError(String),
     IOError(std::io::Error),
     KeyLengthError(String),
+    ResolverError(String),
     ValidationError(String),
 }
 
-impl From<decode::Error> for Error {
-    fn from(e: decode::Error) -> Self {
-        Error::DecodeError(e)
+impl From<decode::ValueReadError> for Error {
+    fn from(e: decode::ValueReadError) -> Self {
+        Error::DecodeError(Box::new(e))
+    }
+}
+
+impl From<rmp_serde::decode::Error> for Error {
+    fn from(e: rmp_serde::decode::Error) -> Self {
+        Error::DecodeError(Box::new(e))
     }
 }
 

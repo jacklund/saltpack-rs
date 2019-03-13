@@ -1,6 +1,8 @@
 use crate::error::Error;
-use sodiumoxide::crypto::{auth, box_, scalarmult, secretbox};
+use sodiumoxide::crypto::{auth, box_, hash, secretbox};
 use std::convert::From;
+use std;
+use std::fmt;
 use std::ops::{Index, IndexMut};
 
 // Various cryptography types
@@ -10,10 +12,8 @@ use std::ops::{Index, IndexMut};
 // it gives us some important length/type checking
 //
 // We have a macro to do the heavy lifting, plus converters to allow us to
-// convert from our types to those required by sodiumoxide. We _could_ have
-// just used the sodiumoxide types, but that would have exposed that library
-// at a higher level than I would like. The conversions are basically zero-cost
-// anyway.
+// convert from our types to those required by sodiumoxide. We use the sodiumoxide
+// types otherwise, since they work especially well with serde.
 
 pub trait FromSlice<T> {
     fn from_slice(data: &[u8]) -> Result<T, Error>;
@@ -22,7 +22,7 @@ pub trait FromSlice<T> {
 #[macro_export]
 macro_rules! cryptotype {
     ( $x:ident, $l:expr ) => {
-        #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+        #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
         pub struct $x(pub [u8; $l]);
 
         impl $x {
@@ -55,29 +55,43 @@ macro_rules! cryptotype {
     };
 }
 
-// Authenticator
-cryptotype!(Authenticator, 32);
+// Have to implement this by hand because the derives for [u8; $x] only
+// go up to $x <= 32 ¯\_(ツ)_/¯
+#[derive(Clone)]
+pub struct Hash(pub [u8; 64]);
 
-// Public Key
-cryptotype!(PublicKey, 32);
-
-impl From<scalarmult::GroupElement> for PublicKey {
-    fn from(ge: scalarmult::GroupElement) -> PublicKey {
-        PublicKey(ge.0)
+impl fmt::Debug for Hash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	fmt::Debug::fmt(&&self.0[..], f)
     }
 }
 
-// Secret Key
-cryptotype!(SecretKey, 32);
+impl Eq for Hash {}
+
+impl PartialEq for Hash {
+    #[inline]
+    fn eq(&self, other: &Hash) -> bool { self.0[..] == other.0[..] }
+    #[inline]
+    fn ne(&self, other: &Hash) -> bool { self.0[..] != other.0[..] }
+}
+
+impl std::hash::Hash for Hash {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+	std::hash::Hash::hash(&self.0[..], state)
+    }
+}
+
+// Authenticator
+cryptotype!(Authenticator, 32);
 
 // MAC
 cryptotype!(MacKey, 32);
 
-// Symmetric Key
-cryptotype!(SymmetricKey, 32);
-
 // Nonce
 cryptotype!(Nonce, 24);
+
+// Hash
+// cryptotype!(Hash, 64);
 
 // Convert from auth::Tag to Authenticator
 impl From<auth::Tag> for Authenticator {
@@ -100,9 +114,23 @@ impl From<Nonce> for box_::Nonce {
     }
 }
 
+// Convert from &Nonce to box_::Nonce
+impl From<&Nonce> for box_::Nonce {
+    fn from(nonce: &Nonce) -> box_::Nonce {
+        box_::Nonce(nonce.0)
+    }
+}
+
 // Convert from Nonce to secretbox::Nonce
 impl From<Nonce> for secretbox::Nonce {
     fn from(nonce: Nonce) -> secretbox::Nonce {
+        secretbox::Nonce(nonce.0)
+    }
+}
+
+// Convert from &Nonce to secretbox::Nonce
+impl From<&Nonce> for secretbox::Nonce {
+    fn from(nonce: &Nonce) -> secretbox::Nonce {
         secretbox::Nonce(nonce.0)
     }
 }
@@ -123,56 +151,9 @@ impl IndexMut<usize> for Nonce {
     }
 }
 
-// Convert from a PublicKey to a box_::PublicKey
-impl From<PublicKey> for box_::PublicKey {
-    fn from(key: PublicKey) -> box_::PublicKey {
-        box_::PublicKey(key.0)
-    }
-}
-
-// Convert from a box_::PublicKey to a PublicKey
-impl From<box_::PublicKey> for PublicKey {
-    fn from(key: box_::PublicKey) -> PublicKey {
-        PublicKey(key.0)
-    }
-}
-
-// Convert from a SecretKey to a box_::SecretKey
-impl From<SecretKey> for box_::SecretKey {
-    fn from(key: SecretKey) -> box_::SecretKey {
-        box_::SecretKey(key.0)
-    }
-}
-
-// Convert from a box_::SecretKey to a SecretKey
-impl From<box_::SecretKey> for SecretKey {
-    fn from(key: box_::SecretKey) -> SecretKey {
-        SecretKey(key.0)
-    }
-}
-
-impl From<SecretKey> for scalarmult::Scalar {
-    fn from(sk: SecretKey) -> scalarmult::Scalar {
-        scalarmult::Scalar(sk.0)
-    }
-}
-
-impl From<&SecretKey> for scalarmult::Scalar {
-    fn from(sk: &SecretKey) -> scalarmult::Scalar {
-        scalarmult::Scalar(sk.0)
-    }
-}
-
-// Convert from a SymmetricKey to a secretbox::Key
-impl From<&SymmetricKey> for secretbox::Key {
-    fn from(key: &SymmetricKey) -> secretbox::Key {
-        secretbox::Key(key.0)
-    }
-}
-
-// Convert from a SymmetricKey to a secretbox::Key
-impl From<SymmetricKey> for secretbox::Key {
-    fn from(key: SymmetricKey) -> secretbox::Key {
-        secretbox::Key(key.0)
+// Convert from a Hash to a hash::Digest
+impl From<Hash> for hash::Digest {
+    fn from(hash: Hash) -> hash::Digest {
+        hash::Digest(hash.0)
     }
 }

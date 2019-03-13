@@ -1,4 +1,4 @@
-use crate::cryptotypes::{PublicKey, SecretKey};
+use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
 use std::collections::HashMap;
 
 pub struct KeyRing {

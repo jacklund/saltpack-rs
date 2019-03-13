@@ -1,10 +1,14 @@
 use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::Mode;
-use crate::cryptotypes::{MacKey, PublicKey, SymmetricKey};
+use crate::cryptotypes::MacKey;
 use crate::keyring::KeyRing;
 use base64;
-use sodiumoxide::crypto::{box_, hash};
+use rmp_serde::{Deserializer};
+use serde::{Deserialize};
+use sodiumoxide::crypto::hash;
+use sodiumoxide::crypto::box_::PublicKey;
+use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
 use std::fmt;
 use std::io::Read;
 
@@ -13,11 +17,16 @@ pub struct SigningHeader {
     format_name: String,
     version: [u32; 2],
     mode: Mode,
-    sender_public_key: box_::PublicKey,
+    sender_public_key: PublicKey,
     nonce: [u8; 32],
 }
 
 impl SigningHeader {
+    pub fn decode(buf: &[u8]) -> Result<Self, Error> {
+        let mut de = Deserializer::new(buf);
+        Ok(Deserialize::deserialize(&mut de)?)
+    }
+
     pub fn get_handler(
         &self,
         header_hash: hash::Digest,
@@ -32,7 +41,7 @@ impl fmt::Display for SigningHeader {
         writeln!(f, "Header:")?;
         writeln!(f, "  format: {}", self.format_name)?;
         writeln!(f, "  version: {}.{}", self.version[0], self.version[1])?;
-        if self.mode == Mode::AttachedSigningMode {
+        if self.mode == Mode::AttachedSigning {
             writeln!(f, "  mode: attached signing")?;
         } else {
             writeln!(f, "  mode: detached signing")?;
