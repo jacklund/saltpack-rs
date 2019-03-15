@@ -3,6 +3,7 @@ use byteorder::{BigEndian, WriteBytesExt};
 use rmp::encode;
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
+use serde::de;
 use serde_bytes;
 use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
 use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
@@ -13,7 +14,7 @@ use std::io::Read;
 use crate::cryptotypes::{Authenticator, FromSlice, MacKey, Nonce};
 use crate::error::Error;
 use crate::handler::Handler;
-use crate::header::{Mode, Version, FORMAT_NAME, VERSION};
+use crate::header::{FORMAT_NAME, VERSION, Mode, Version};
 use crate::keyring::KeyRing;
 use crate::util::{
     cryptobox_zero_bytes, generate_keypair, generate_random_symmetric_key, generate_recipient_nonce,
@@ -21,7 +22,7 @@ use crate::util::{
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct EncryptionRecipientPair {
-    public_key: Option<Vec<u8>>,
+    public_key: Option<PublicKey>,
     #[serde(with = "serde_bytes")]
     payload_key_box: Vec<u8>,
 }
@@ -58,7 +59,7 @@ impl  EncryptionHeader {
                 &ephemeral_secret_key,
             );
             recipients_list.push(EncryptionRecipientPair {
-                public_key: Some(recipient.0.to_vec().into()),
+                public_key: Some(*recipient),
                 payload_key_box,
             });
         }
@@ -85,8 +86,9 @@ impl  EncryptionHeader {
         (digest, packet)
     }
 
-    pub fn decode(buf: &[u8]) -> Result<Self, Error> {
-        let mut de = Deserializer::new(buf);
+    pub fn decode<'a, R>(mut de: Deserializer<R>) -> Result<Self, Error>
+        where R: rmp_serde::decode::Read<'a>
+    {
         Ok(Deserialize::deserialize(&mut de)?)
     }
 
@@ -108,7 +110,7 @@ impl  EncryptionHeader {
             .recipients_list
             .iter()
             .filter_map(|r| r.public_key.clone())
-            .map(|p| keyring.find_encryption_key(&PublicKey::from_slice(&p).unwrap()))
+            .map(|p| keyring.find_encryption_key(&p))
             .filter(|&s| s.is_some())
             .map(|s| s.unwrap())
             .collect();
@@ -247,6 +249,7 @@ impl Handler for EncryptionHandler {
 struct PayloadPacket {
     final_flag: bool,
     authenticators: Vec<Authenticator>,
+    #[serde(with = "serde_bytes")]
     payload_secretbox: Vec<u8>,
 }
 

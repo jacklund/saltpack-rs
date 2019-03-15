@@ -73,11 +73,12 @@ impl  Header {
         println!("header data length = {}", buf.len());
         println!("header data = {:x?}", buf);
         let digest: hash::Digest = hash::sha512::hash(&buf);
-        let tmpbuf: Vec<u8> = buf.clone();
+        let tmpbuf = buf.clone();
         let mut de = Deserializer::new(tmpbuf.as_slice());
         let common: CommonHeader = Deserialize::deserialize(&mut de)?;
+        de = Deserializer::new(buf.as_slice());
         let header: Header = match common.mode {
-            Mode::Encryption => Header::Encryption(EncryptionHeader::decode(&buf)?),
+            Mode::Encryption => Header::Encryption(EncryptionHeader::decode(de)?),
             Mode::AttachedSigning | Mode::DetachedSigning => Header::Signing(SigningHeader::decode(&buf)?),
             Mode::Signcryption => Header::Signcryption(SigncryptionHeader::decode(&buf)?),
         };

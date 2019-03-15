@@ -19,11 +19,51 @@ pub trait FromSlice<T> {
     fn from_slice(data: &[u8]) -> Result<T, Error>;
 }
 
+// Define crypto types. Note: (de)serialization code borrowed from sodiumoxide
 #[macro_export]
 macro_rules! cryptotype {
     ( $x:ident, $l:expr ) => {
-        #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
         pub struct $x(pub [u8; $l]);
+
+        impl ::serde::Serialize for $x {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                where S: ::serde::Serializer
+            {
+                serializer.serialize_bytes(&self.0[..])
+            }
+        }
+
+        impl<'de> ::serde::Deserialize<'de> for $x {
+            fn deserialize<D>(deserializer: D) -> Result<$x, D::Error>
+                where D: ::serde::Deserializer<'de>
+            {
+                struct NewtypeVisitor;
+                impl<'de> ::serde::de::Visitor<'de> for NewtypeVisitor {
+                    type Value = $x;
+                    fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                        write!(formatter, stringify!($x))
+                    }
+                    fn visit_seq<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
+                        where V: ::serde::de::SeqAccess<'de>
+                    {
+                        let mut res = $x([0; $l]);
+                        for r in res.0.iter_mut() {
+                            if let Some(value) = visitor.next_element()? {
+                                *r = value;
+                            }
+                        }
+                        Ok(res)
+                    }
+                    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+                        where E: ::serde::de::Error
+                    {
+                        $x::from_slice(v).map_err(|_| ::serde::de::Error::invalid_length(v.len(), &self))
+                    }
+                }
+                deserializer.deserialize_bytes(NewtypeVisitor)
+            }
+        }
 
         impl $x {
             pub fn bytes(&self) -> Vec<u8> {
