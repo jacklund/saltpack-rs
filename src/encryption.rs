@@ -3,7 +3,6 @@ use byteorder::{BigEndian, WriteBytesExt};
 use rmp::encode;
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
-use serde::de;
 use serde_bytes;
 use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
 use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
@@ -14,11 +13,23 @@ use std::io::Read;
 use crate::cryptotypes::{Authenticator, FromSlice, MacKey, Nonce};
 use crate::error::Error;
 use crate::handler::Handler;
-use crate::header::{FORMAT_NAME, VERSION, Mode, Version};
+use crate::header::{Mode, Version, FORMAT_NAME, VERSION};
 use crate::keyring::KeyRing;
 use crate::util::{
     cryptobox_zero_bytes, generate_keypair, generate_random_symmetric_key, generate_recipient_nonce,
 };
+
+// Encryption header
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub struct EncryptionHeader {
+    pub format_name: String,
+    pub version: Version,
+    pub mode: Mode,
+    pub public_key: PublicKey,
+    #[serde(with = "serde_bytes")]  // Needed to be able to decode a bin8 as a byte vector
+    pub sender_secretbox: Vec<u8>,
+    pub recipients_list: Vec<EncryptionRecipientPair>,
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct EncryptionRecipientPair {
@@ -27,18 +38,7 @@ pub struct EncryptionRecipientPair {
     payload_key_box: Vec<u8>,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct EncryptionHeader {
-    pub format_name: String,
-    pub version: Version,
-    pub mode: Mode,
-    pub public_key: PublicKey,
-    #[serde(with = "serde_bytes")]
-    pub sender_secretbox: Vec<u8>,
-    pub recipients_list: Vec<EncryptionRecipientPair>,
-}
-
-impl  EncryptionHeader {
+impl EncryptionHeader {
     pub fn new(
         sender: &PublicKey,
         recipients: &[PublicKey],
@@ -87,7 +87,8 @@ impl  EncryptionHeader {
     }
 
     pub fn decode<'a, R>(mut de: Deserializer<R>) -> Result<Self, Error>
-        where R: rmp_serde::decode::Read<'a>
+    where
+        R: rmp_serde::decode::Read<'a>,
     {
         Ok(Deserialize::deserialize(&mut de)?)
     }
@@ -194,8 +195,7 @@ impl EncryptionHandler {
         packet: &PayloadPacket,
         packet_index: usize,
     ) -> Result<Vec<u8>, Error> {
-        let payload_secretbox_nonce: Nonce =
-            generate_payload_secretbox_nonce(self.recipient_index as u64);
+        let payload_secretbox_nonce: Nonce = generate_payload_secretbox_nonce(packet_index as u64);
         let authenticator: Authenticator = generate_authenticator(
             &generate_authenticator_data(
                 &self.header_hash,
@@ -348,8 +348,8 @@ fn generate_recipient_mac_key(
 
     // Combine parts of the two encrypted tokens and hash that
     let mut encrypted_buf: Vec<u8> = vec![];
-    encrypted_buf.extend_from_slice(&encrypted1[32..]);
-    encrypted_buf.extend_from_slice(&encrypted2[32..]);
+    encrypted_buf.extend_from_slice(&encrypted1[16..]);
+    encrypted_buf.extend_from_slice(&encrypted2[16..]);
     let mac_digest: hash::Digest = hash::sha512::hash(&encrypted_buf);
     MacKey::from_slice(&mac_digest[..32]).unwrap()
 }
@@ -478,7 +478,7 @@ fn generate_authenticator(authenticator_data: &[u8], key: &MacKey) -> Authentica
 fn generate_payload_secretbox_nonce(index: u64) -> Nonce {
     let mut nonce: Vec<u8> = vec![];
     nonce.extend_from_slice(b"saltpack_ploadsb");
-    nonce.write_u64::<BigEndian>(index as u64).unwrap();
+    nonce.write_u64::<BigEndian>(index).unwrap();
 
     Nonce::from_slice(&nonce).unwrap()
 }
@@ -542,7 +542,7 @@ pub fn encrypt_payload_key_for_recipient(
     )
 }
 
-impl  fmt::Display for EncryptionHeader {
+impl fmt::Display for EncryptionHeader {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "Header:")?;
         writeln!(f, "  format: {}", self.format_name)?;
@@ -638,8 +638,7 @@ mod tests {
         }
 
         let plaintext = process_data(&mut &data[..], &keyring, mock_key_resolver).unwrap();
-        println!("{}", str::from_utf8(&plaintext).unwrap());
-        assert!(false);
+        assert_eq!("hardcoded message v2", str::from_utf8(&plaintext).unwrap());
     }
 
     #[test]
@@ -663,11 +662,9 @@ mod tests {
             &ephemeral_public_key,
             &ephemeral_secret_key,
         );
-        println!("{}", header);
 
         let mut buf: Vec<u8> = vec![];
         header.serialize(&mut Serializer::new(&mut buf)).unwrap();
-        println!("{:x?}", buf);
         let mut de = Deserializer::new(&buf[..]);
         let foo: EncryptionHeader = Deserialize::deserialize(&mut de).unwrap();
         assert_eq!(header, foo);

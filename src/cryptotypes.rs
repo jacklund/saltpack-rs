@@ -1,7 +1,7 @@
 use crate::error::Error;
 use sodiumoxide::crypto::{auth, box_, hash, secretbox};
-use std::convert::From;
 use std;
+use std::convert::From;
 use std::fmt;
 use std::ops::{Index, IndexMut};
 
@@ -28,7 +28,8 @@ macro_rules! cryptotype {
 
         impl ::serde::Serialize for $x {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-                where S: ::serde::Serializer
+            where
+                S: ::serde::Serializer,
             {
                 serializer.serialize_bytes(&self.0[..])
             }
@@ -36,16 +37,21 @@ macro_rules! cryptotype {
 
         impl<'de> ::serde::Deserialize<'de> for $x {
             fn deserialize<D>(deserializer: D) -> Result<$x, D::Error>
-                where D: ::serde::Deserializer<'de>
+            where
+                D: ::serde::Deserializer<'de>,
             {
                 struct NewtypeVisitor;
                 impl<'de> ::serde::de::Visitor<'de> for NewtypeVisitor {
                     type Value = $x;
-                    fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                    fn expecting(
+                        &self,
+                        formatter: &mut ::std::fmt::Formatter,
+                    ) -> ::std::fmt::Result {
                         write!(formatter, stringify!($x))
                     }
                     fn visit_seq<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
-                        where V: ::serde::de::SeqAccess<'de>
+                    where
+                        V: ::serde::de::SeqAccess<'de>,
                     {
                         let mut res = $x([0; $l]);
                         for r in res.0.iter_mut() {
@@ -56,9 +62,11 @@ macro_rules! cryptotype {
                         Ok(res)
                     }
                     fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-                        where E: ::serde::de::Error
+                    where
+                        E: ::serde::de::Error,
                     {
-                        $x::from_slice(v).map_err(|_| ::serde::de::Error::invalid_length(v.len(), &self))
+                        $x::from_slice(v)
+                            .map_err(|_| ::serde::de::Error::invalid_length(v.len(), &self))
                     }
                 }
                 deserializer.deserialize_bytes(NewtypeVisitor)
@@ -102,7 +110,7 @@ pub struct Hash(pub [u8; 64]);
 
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-	fmt::Debug::fmt(&&self.0[..], f)
+        fmt::Debug::fmt(&&self.0[..], f)
     }
 }
 
@@ -110,14 +118,18 @@ impl Eq for Hash {}
 
 impl PartialEq for Hash {
     #[inline]
-    fn eq(&self, other: &Hash) -> bool { self.0[..] == other.0[..] }
+    fn eq(&self, other: &Hash) -> bool {
+        self.0[..] == other.0[..]
+    }
     #[inline]
-    fn ne(&self, other: &Hash) -> bool { self.0[..] != other.0[..] }
+    fn ne(&self, other: &Hash) -> bool {
+        self.0[..] != other.0[..]
+    }
 }
 
 impl std::hash::Hash for Hash {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-	std::hash::Hash::hash(&self.0[..], state)
+        std::hash::Hash::hash(&self.0[..], state)
     }
 }
 

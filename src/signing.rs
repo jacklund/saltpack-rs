@@ -1,13 +1,13 @@
+use crate::cryptotypes::MacKey;
 use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::Mode;
-use crate::cryptotypes::MacKey;
 use crate::keyring::KeyRing;
 use base64;
-use rmp_serde::{Deserializer};
-use serde::{Deserialize};
-use sodiumoxide::crypto::hash;
+use rmp_serde::Deserializer;
+use serde::Deserialize;
 use sodiumoxide::crypto::box_::PublicKey;
+use sodiumoxide::crypto::hash;
 use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
 use std::fmt;
 use std::io::Read;

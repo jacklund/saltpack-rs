@@ -1,10 +1,10 @@
+use crate::cryptotypes::{FromSlice, Nonce};
 use base64;
 use byteorder::{BigEndian, WriteBytesExt};
-use crate::cryptotypes::{FromSlice, Nonce};
+use rand;
 use sodiumoxide::crypto::box_;
 use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
 use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
-use rand;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::iter;
@@ -17,8 +17,7 @@ pub fn generate_random_symmetric_key() -> SymmetricKey {
     SymmetricKey::from_slice(&generate_random_key()).unwrap()
 }
 
-fn generate_random_key() -> Vec<u8>
-{
+fn generate_random_key() -> Vec<u8> {
     iter::repeat_with(rand::random::<u8>)
         .take(32)
         .collect::<Vec<u8>>()

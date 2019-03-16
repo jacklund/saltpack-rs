@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 pub struct KeyRing {
     encryption_keys: HashMap<PublicKey, SecretKey>,
-    signing_keys: HashMap<PublicKey, SecretKey>
+    signing_keys: HashMap<PublicKey, SecretKey>,
 }
 
 impl KeyRing {

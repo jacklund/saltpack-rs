@@ -7,12 +7,12 @@ use crate::process_data::KeyResolver;
 use crate::util::{cryptobox_zero_bytes, generate_recipient_nonce};
 use base64;
 use byteorder::{BigEndian, WriteBytesExt};
-use rmp_serde::{Deserializer};
-use serde::{Deserialize};
+use rmp_serde::Deserializer;
+use serde::Deserialize;
 use serde_bytes;
+use sodiumoxide::crypto::auth::Key as SigningKey;
 use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
 use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
-use sodiumoxide::crypto::auth::Key as SigningKey;
 use sodiumoxide::crypto::{auth, hash, secretbox};
 use std::fmt;
 use std::io::Read;
@@ -235,7 +235,8 @@ impl SigncryptionHandler {
                 packet.final_flag,
                 &hash::sha512::hash(&plaintext),
             );
-            let generated_signature = auth::authenticate(&signature_input, &self.sender_signing_key);
+            let generated_signature =
+                auth::authenticate(&signature_input, &self.sender_signing_key);
             if generated_signature != auth::Tag::from_slice(&signature).unwrap() {
                 return Err(Error::AuthenticationError("Signature mismatch".to_string()));
             }

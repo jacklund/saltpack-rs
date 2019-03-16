@@ -7,7 +7,11 @@ use std::io::Read;
 
 pub type KeyResolver = fn(&Vec<Vec<u8>>) -> Result<Vec<Option<SymmetricKey>>, Error>;
 
-pub fn process_data(reader: &mut Read, keyring: &KeyRing, key_resolver: KeyResolver) -> Result<Vec<u8>, Error> {
+pub fn process_data(
+    reader: &mut Read,
+    keyring: &KeyRing,
+    key_resolver: KeyResolver,
+) -> Result<Vec<u8>, Error> {
     println!("Decoding header");
     let (header_hash, header) = Header::decode(reader)?;
     println!("Header decoded");

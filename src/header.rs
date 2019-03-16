@@ -57,6 +57,9 @@ pub enum Header {
     Signcryption(SigncryptionHeader),
 }
 
+// We decrypt the common header first to get the mode enum
+// Normally, we should be able to use the structure of the header to figure out
+// which it is, but the headers are too similar for serde to properly distinguish them
 #[derive(Debug, Deserialize)]
 pub struct CommonHeader {
     pub format_name: String,
@@ -64,27 +67,36 @@ pub struct CommonHeader {
     pub mode: Mode,
 }
 
-impl  Header {
+impl Header {
+    // Decode the header
     pub fn decode(mut reader: &mut Read) -> Result<(hash::Digest, Self), Error> {
+        // The header is double-encoded, so we read the length and grab the buffer to decode first
         let bin_header_len: usize = decode::read_bin_len(&mut reader).unwrap() as usize;
-        println!("header len = {}", bin_header_len);
         let mut buf = vec![0u8; bin_header_len];
         reader.read_exact(&mut buf)?;
-        println!("header data length = {}", buf.len());
-        println!("header data = {:x?}", buf);
+
+        // Calculate the header hash for use later
         let digest: hash::Digest = hash::sha512::hash(&buf);
+
+        // We need to clone the buffer because we're decoding the common header first, then
+        // re-decoding the full header in each decode method
         let tmpbuf = buf.clone();
         let mut de = Deserializer::new(tmpbuf.as_slice());
         let common: CommonHeader = Deserialize::deserialize(&mut de)?;
+
+        // Decode the full header
         de = Deserializer::new(buf.as_slice());
         let header: Header = match common.mode {
             Mode::Encryption => Header::Encryption(EncryptionHeader::decode(de)?),
-            Mode::AttachedSigning | Mode::DetachedSigning => Header::Signing(SigningHeader::decode(&buf)?),
+            Mode::AttachedSigning | Mode::DetachedSigning => {
+                Header::Signing(SigningHeader::decode(&buf)?)
+            }
             Mode::Signcryption => Header::Signcryption(SigncryptionHeader::decode(&buf)?),
         };
         Ok((digest, header))
     }
 
+    // Get the handler, which is used to decrypt the payload
     pub fn get_handler(
         &self,
         header_hash: hash::Digest,
@@ -103,7 +115,7 @@ impl  Header {
     }
 }
 
-impl  fmt::Display for Header {
+impl fmt::Display for Header {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Header::Encryption(hdr) => hdr.fmt(f),
