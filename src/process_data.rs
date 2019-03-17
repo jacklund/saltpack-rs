@@ -12,10 +12,7 @@ pub fn process_data(
     keyring: &KeyRing,
     key_resolver: KeyResolver,
 ) -> Result<Vec<u8>, Error> {
-    println!("Decoding header");
     let (header_hash, header) = Header::decode(reader)?;
-    println!("Header decoded");
     let handler = header.get_handler(header_hash, keyring, key_resolver)?;
-    println!("Processing payload");
     handler.process_payload(reader)
 }

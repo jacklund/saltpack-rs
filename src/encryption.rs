@@ -602,8 +602,11 @@ mod tests {
     fn test_encrypt() {
         let (sender_public_key, sender_secret_key) = generate_keypair();
         let mut recipients: Vec<PublicKey> = vec![];
+        let mut keyring: KeyRing = KeyRing::new();
         for _ in 0..4 {
-            recipients.push(generate_random_public_key());
+            let (public_key, secret_key) = generate_keypair();
+            recipients.push(public_key);
+            keyring.add_encryption_keys(public_key, secret_key);
         }
 
         let ciphertext = encrypt(
@@ -613,7 +616,9 @@ mod tests {
             b"Hello, World!",
         );
         println!("{}", base64::encode(&ciphertext));
-        assert!(false);
+        let plaintext = process_data(&mut &ciphertext[..], &keyring, mock_key_resolver).unwrap();
+        println!("{}", str::from_utf8(&plaintext).unwrap());
+        assert_eq!("Hello, World!", str::from_utf8(&plaintext).unwrap());
     }
 
     fn mock_key_resolver(identifiers: &Vec<Vec<u8>>) -> Result<Vec<Option<SymmetricKey>>, Error> {
