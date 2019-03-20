@@ -26,7 +26,7 @@ pub struct EncryptionHeader {
     pub version: Version,
     pub mode: Mode,
     pub public_key: PublicKey,
-    #[serde(with = "serde_bytes")]  // Needed to be able to decode a bin8 as a byte vector
+    #[serde(with = "serde_bytes")] // Needed to be able to decode a bin8 as a byte vector
     pub sender_secretbox: Vec<u8>,
     pub recipients_list: Vec<EncryptionRecipientPair>,
 }
@@ -98,9 +98,6 @@ impl EncryptionHeader {
         header_hash: hash::Digest,
         keyring: &KeyRing,
     ) -> Result<Box<Handler>, Error> {
-        // Validate the expected values
-        // self.validate()?;
-
         // Are any of our recipients anonymous?
         // let has_anonymous = self.recipients_list.iter().any(|r| r.public_key.is_none());
         let has_anonymous = false;
@@ -615,9 +612,7 @@ mod tests {
             &recipients,
             b"Hello, World!",
         );
-        println!("{}", base64::encode(&ciphertext));
         let plaintext = process_data(&mut &ciphertext[..], &keyring, mock_key_resolver).unwrap();
-        println!("{}", str::from_utf8(&plaintext).unwrap());
         assert_eq!("Hello, World!", str::from_utf8(&plaintext).unwrap());
     }
 

@@ -67,6 +67,26 @@ pub struct CommonHeader {
     pub mode: Mode,
 }
 
+impl CommonHeader {
+    fn validate(&self) -> Result<(), Error> {
+        if self.format_name != FORMAT_NAME {
+            return Err(Error::ValidationError(format!(
+                "Unknown format name {}",
+                self.format_name
+            )));
+        }
+
+        if self.version != VERSION {
+            return Err(Error::ValidationError(format!(
+                "Unknown version {}",
+                self.version
+            )));
+        }
+
+        Ok(())
+    }
+}
+
 impl Header {
     // Decode the header
     pub fn decode(mut reader: &mut Read) -> Result<(hash::Digest, Self), Error> {
@@ -83,6 +103,7 @@ impl Header {
         let tmpbuf = buf.clone();
         let mut de = Deserializer::new(tmpbuf.as_slice());
         let common: CommonHeader = Deserialize::deserialize(&mut de)?;
+        common.validate()?;
 
         // Decode the full header
         de = Deserializer::new(buf.as_slice());

@@ -1,7 +1,7 @@
 use crate::cryptotypes::{FromSlice, Nonce};
 use crate::error::Error;
 use crate::handler::Handler;
-use crate::header::{Mode, Version, FORMAT_NAME, VERSION};
+use crate::header::{Mode, Version};
 use crate::keyring::KeyRing;
 use crate::process_data::KeyResolver;
 use crate::util::{cryptobox_zero_bytes, generate_recipient_nonce};
@@ -51,9 +51,6 @@ impl SigncryptionHeader {
         keyring: &KeyRing,
         resolver: KeyResolver,
     ) -> Result<Box<Handler>, Error> {
-        // Validate the expected values
-        // self.validate()?;
-
         // Check to see if our any secret keys unlock the payload_key_box
         let mut payload_key_opt: Option<SymmetricKey> = self.try_secret_keys(keyring)?;
 
@@ -330,11 +327,7 @@ mod tests {
     #[test]
     fn test_read_signcryption_header() {
         let data: Vec<u8> = read_base64_file("fixtures/signcryption.txt");
-        let bin_header_len: usize = decode::read_bin_len(&mut data.as_slice()).unwrap() as usize;
-        let bin_header: Vec<u8> = data[3..(bin_header_len + 3)].to_vec();
-        let cur = Cursor::new(&bin_header[..]);
-        let mut de = Deserializer::new(cur);
-        let header: Header = Deserialize::deserialize(&mut de).unwrap();
+        let (_header_hash, header) = Header::decode(&mut data.as_slice()).unwrap();
         if let Header::Signcryption(signcryption_header) = header {
             assert_eq!(15, signcryption_header.recipients_list.len());
         } else {
