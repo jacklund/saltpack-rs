@@ -1,12 +1,17 @@
 use crate::cryptotypes::{FromSlice, Nonce};
 use crate::error::Error;
 use crate::handler::Handler;
-use crate::header::{Mode, Version};
+use crate::header::{Mode, Version, FORMAT_NAME, VERSION};
 use crate::keyring::KeyRing;
 use crate::process_data::KeyResolver;
-use crate::util::{cryptobox_zero_bytes, generate_recipient_nonce};
+use crate::util::{
+    cryptobox_zero_bytes, generate_header_packet, generate_keypair, generate_random_symmetric_key,
+    generate_recipient_nonce,
+};
 use base64;
 use byteorder::{BigEndian, WriteBytesExt};
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use rmp_serde::Deserializer;
 use serde::Deserialize;
 use serde_bytes;
@@ -16,6 +21,7 @@ use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
 use sodiumoxide::crypto::{auth, hash, secretbox};
 use std::fmt;
 use std::io::Read;
+use std::iter;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SigncryptionRecipientPair {
@@ -40,6 +46,57 @@ const BOX_HMAC_KEY: &[u8] = b"saltpack signcryption box key identifier";
 const SYMMETRIC_HMAC_KEY: &[u8] = b"saltpack signcryption derived symmetric key";
 
 impl SigncryptionHeader {
+    pub fn new(
+        public_signing_key: &PublicKey,
+        recipient_public_keys: &[PublicKey],
+        recipient_symmetric_keys: &[ReceiverSymmetricKey],
+    ) -> Self {
+        // Generate payload key
+        let payload_key: SymmetricKey = generate_random_symmetric_key();
+
+        // Generate ephemeral keypair
+        let (ephemeral_public_key, ephemeral_secret_key) = generate_keypair();
+
+        let sender_secretbox = secretbox::seal(
+            public_signing_key.as_ref(),
+            &secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap(),
+            &payload_key,
+        );
+
+        // Combine the keys so we can shuffle them all
+        // Can't use anything with an iterator, because we'd need to
+        // implement FromIterator, which we can't for PublicKey
+        let mut recipient_keys: Vec<Box<RecipientKey>> = vec![];
+        for key in recipient_public_keys {
+            recipient_keys.push(Box::new(*key));
+        }
+        for key in recipient_symmetric_keys {
+            recipient_keys.push(Box::new(key.clone()));
+        }
+
+        let mut rng = thread_rng();
+        recipient_keys.shuffle(&mut rng);
+
+        let mut recipients_list: Vec<SigncryptionRecipientPair> = vec![];
+        for (index, key) in recipient_keys.iter().enumerate() {
+            recipients_list.push(key.generate_id_and_box(
+                &payload_key,
+                &ephemeral_public_key,
+                &ephemeral_secret_key,
+                index,
+            ));
+        }
+
+        SigncryptionHeader {
+            format_name: FORMAT_NAME.to_string(),
+            version: VERSION,
+            mode: Mode::Signcryption,
+            public_key: ephemeral_public_key,
+            sender_secretbox,
+            recipients_list,
+        }
+    }
+
     pub fn decode(buf: &[u8]) -> Result<Self, Error> {
         let mut de = Deserializer::new(buf);
         Ok(Deserialize::deserialize(&mut de)?)
@@ -315,6 +372,104 @@ struct PayloadPacket {
     final_flag: bool,
 }
 
+#[derive(Clone)]
+pub struct ReceiverSymmetricKey {
+    identifer: Vec<u8>,
+    key: SymmetricKey,
+}
+
+trait RecipientKey {
+    fn generate_id_and_box(
+        &self,
+        payload_key: &SymmetricKey,
+        ephemeral_public_key: &PublicKey,
+        ephemeral_secret_key: &SecretKey,
+        index: usize,
+    ) -> SigncryptionRecipientPair;
+}
+
+impl RecipientKey for PublicKey {
+    fn generate_id_and_box(
+        &self,
+        payload_key: &SymmetricKey,
+        _ephemeral_public_key: &PublicKey,
+        ephemeral_secret_key: &SecretKey,
+        index: usize,
+    ) -> SigncryptionRecipientPair {
+        let key_bytes: Vec<u8> = cryptobox_zero_bytes(
+            &Nonce::from_slice(b"saltpack_derived_sboxkey").unwrap(),
+            self,
+            ephemeral_secret_key,
+        );
+        let shared_key: SymmetricKey =
+            SymmetricKey::from_slice(&key_bytes[(key_bytes.len() - 32)..]).unwrap();
+        let recipient_nonce: Nonce = generate_recipient_nonce(index as u64);
+        let payload_key_box: Vec<u8> =
+            secretbox::seal(&payload_key.0, &recipient_nonce.into(), &shared_key);
+        let mut identifier_bytes: Vec<u8> = shared_key.0.to_vec();
+        identifier_bytes.extend(&recipient_nonce.0);
+        let recipient_id: Vec<u8> = auth::hmacsha512::authenticate(
+            &identifier_bytes,
+            &auth::hmacsha512::Key::from_slice(b"saltpack signcryption box key identifier")
+                .unwrap(),
+        )[..32]
+            .to_vec();
+
+        SigncryptionRecipientPair {
+            recipient_id,
+            payload_key_box,
+        }
+    }
+}
+
+impl RecipientKey for ReceiverSymmetricKey {
+    fn generate_id_and_box(
+        &self,
+        payload_key: &SymmetricKey,
+        ephemeral_public_key: &PublicKey,
+        _ephemeral_secret_key: &SecretKey,
+        index: usize,
+    ) -> SigncryptionRecipientPair {
+        // Hash the ephemeral_public_key and symmetric key
+        // to make a shared key
+        let mut key_bytes: Vec<u8> = ephemeral_public_key.0.to_vec();
+        key_bytes.extend(&self.key.0);
+        let shared_key: SymmetricKey = SymmetricKey::from_slice(
+            &auth::hmacsha512::authenticate(
+                &key_bytes,
+                &auth::hmacsha512::Key::from_slice(b"saltpack signcryption derived symmetric key")
+                    .unwrap(),
+            )[..32],
+        )
+        .unwrap();
+        let recipient_nonce: Nonce = generate_recipient_nonce(index as u64);
+        let payload_key_box: Vec<u8> =
+            secretbox::seal(&payload_key.0, &recipient_nonce.into(), &shared_key);
+
+        SigncryptionRecipientPair {
+            recipient_id: self.identifer.clone(),
+            payload_key_box,
+        }
+    }
+}
+
+pub fn signcrypt(
+    public_signing_key: &PublicKey,
+    recipient_public_keys: &[PublicKey],
+    recipient_symmetric_keys: &[ReceiverSymmetricKey],
+) -> Vec<u8> {
+    let header: SigncryptionHeader = SigncryptionHeader::new(
+        public_signing_key,
+        recipient_public_keys,
+        recipient_symmetric_keys,
+    );
+
+    // Generate header packet and header hash
+    let (header_hash, header_packet) = generate_header_packet(&header);
+
+    unimplemented!()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::header::Header;
@@ -333,5 +488,26 @@ mod tests {
         } else {
             assert!(false);
         }
+    }
+
+    #[test]
+    fn test_signcrypt() {
+        let (sender_public_key, sender_secret_key) = generate_keypair();
+        let mut recipients: Vec<PublicKey> = vec![];
+        let mut keyring: KeyRing = KeyRing::new();
+        for _ in 0..4 {
+            let (public_key, secret_key) = generate_keypair();
+            recipients.push(public_key);
+            keyring.add_encryption_keys(public_key, secret_key);
+        }
+
+        let ciphertext = encrypt(
+            &sender_secret_key,
+            &sender_public_key,
+            &recipients,
+            b"Hello, World!",
+        );
+        let plaintext = process_data(&mut &ciphertext[..], &keyring, mock_key_resolver).unwrap();
+        assert_eq!("Hello, World!", str::from_utf8(&plaintext).unwrap());
     }
 }

@@ -16,7 +16,8 @@ use crate::handler::Handler;
 use crate::header::{Mode, Version, FORMAT_NAME, VERSION};
 use crate::keyring::KeyRing;
 use crate::util::{
-    cryptobox_zero_bytes, generate_keypair, generate_random_symmetric_key, generate_recipient_nonce,
+    cryptobox_zero_bytes, generate_header_packet, generate_keypair, generate_random_symmetric_key,
+    generate_recipient_nonce,
 };
 
 // Encryption header
@@ -73,17 +74,6 @@ impl EncryptionHeader {
             sender_secretbox,
             recipients_list,
         }
-    }
-
-    // Serialize the packet, generate the hash of the serialized packet,
-    // then re-encode the serialized packet as a msgpack bin object
-    pub fn generate_header_packet(&self) -> (hash::Digest, Vec<u8>) {
-        let mut buf: Vec<u8> = vec![];
-        self.serialize(&mut Serializer::new(&mut buf)).unwrap();
-        let digest: hash::Digest = hash::sha512::hash(&buf);
-        let mut packet: Vec<u8> = vec![];
-        encode::write_bin(&mut packet, &buf).unwrap();
-        (digest, packet)
     }
 
     pub fn decode<'a, R>(mut de: Deserializer<R>) -> Result<Self, Error>
@@ -297,7 +287,7 @@ pub fn encrypt(
     );
 
     // Generate header packet and header hash
-    let (header_hash, header_packet) = header.generate_header_packet();
+    let (header_hash, header_packet) = generate_header_packet(&header);
 
     // Generate per-recipient mac keys
     let recipient_mac_keys: Vec<MacKey> = generate_encryption_mac_keys(
