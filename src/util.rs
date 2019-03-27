@@ -7,29 +7,68 @@ use rmp_serde::Serializer;
 use serde::Serialize;
 use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
 use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
-use sodiumoxide::crypto::{box_, hash};
+use sodiumoxide::crypto::sign::PublicKey as PublicSigningKey;
+use sodiumoxide::crypto::sign::SecretKey as SigningKey;
+use sodiumoxide::crypto::{box_, hash, sign};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::iter;
 
 pub fn generate_random_public_key() -> PublicKey {
-    PublicKey::from_slice(&generate_random_key()).unwrap()
+    PublicKey::from_slice(&generate_random_key(32)).unwrap()
 }
 
 pub fn generate_random_symmetric_key() -> SymmetricKey {
-    SymmetricKey::from_slice(&generate_random_key()).unwrap()
+    SymmetricKey::from_slice(&generate_random_key(32)).unwrap()
 }
 
-fn generate_random_key() -> Vec<u8> {
+pub fn generate_random_signing_key() -> SigningKey {
+    SigningKey::from_slice(&generate_random_key(64)).unwrap()
+}
+
+fn generate_random_key(len: usize) -> Vec<u8> {
     iter::repeat_with(rand::random::<u8>)
-        .take(32)
+        .take(len)
         .collect::<Vec<u8>>()
 }
 
 pub fn generate_keypair() -> (PublicKey, SecretKey) {
-    let (p, s) = box_::gen_keypair();
+    box_::gen_keypair()
+}
 
-    (p.into(), s.into())
+pub fn generate_signing_keypair() -> (PublicSigningKey, SigningKey) {
+    sign::gen_keypair()
+}
+
+pub fn read_signing_keys_and_data(
+    filename: &str,
+) -> (PublicKey, SecretKey, PublicSigningKey, SigningKey, Vec<u8>) {
+    let mut data: Vec<u8> = vec![];
+    let mut public_key_bytes: Vec<u8> = vec![];
+    let mut private_key_bytes: Vec<u8> = vec![];
+    let mut signing_key_bytes: Vec<u8> = vec![];
+    let mut public_signing_key_bytes: Vec<u8> = vec![];
+    for line in BufReader::new(File::open(filename).unwrap()).lines() {
+        if public_key_bytes.len() == 0 {
+            public_key_bytes = base64::decode(&line.unwrap()).unwrap();
+        } else if private_key_bytes.len() == 0 {
+            private_key_bytes = base64::decode(&line.unwrap()).unwrap();
+        } else if public_signing_key_bytes.len() == 0 {
+            public_signing_key_bytes = base64::decode(&line.unwrap()).unwrap();
+        } else if signing_key_bytes.len() == 0 {
+            signing_key_bytes = base64::decode(&line.unwrap()).unwrap();
+        } else {
+            data.append(&mut base64::decode(&line.unwrap()).unwrap());
+        }
+    }
+
+    (
+        PublicKey::from_slice(&public_key_bytes).unwrap(),
+        SecretKey::from_slice(&private_key_bytes).unwrap(),
+        PublicSigningKey::from_slice(&public_key_bytes).unwrap(),
+        SigningKey::from_slice(&signing_key_bytes).unwrap(),
+        data,
+    )
 }
 
 pub fn read_base64_file(filename: &str) -> Vec<u8> {

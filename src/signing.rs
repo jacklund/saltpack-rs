@@ -4,8 +4,6 @@ use crate::handler::Handler;
 use crate::header::Mode;
 use crate::keyring::KeyRing;
 use base64;
-use rmp_serde::Deserializer;
-use serde::Deserialize;
 use sodiumoxide::crypto::box_::PublicKey;
 use sodiumoxide::crypto::hash;
 use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
@@ -22,11 +20,6 @@ pub struct SigningHeader {
 }
 
 impl SigningHeader {
-    pub fn decode(buf: &[u8]) -> Result<Self, Error> {
-        let mut de = Deserializer::new(buf);
-        Ok(Deserialize::deserialize(&mut de)?)
-    }
-
     pub fn get_handler(
         &self,
         header_hash: hash::Digest,

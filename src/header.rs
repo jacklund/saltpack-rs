@@ -108,11 +108,11 @@ impl Header {
         // Decode the full header
         de = Deserializer::new(buf.as_slice());
         let header: Header = match common.mode {
-            Mode::Encryption => Header::Encryption(EncryptionHeader::decode(de)?),
+            Mode::Encryption => Header::Encryption(Deserialize::deserialize(&mut de)?),
             Mode::AttachedSigning | Mode::DetachedSigning => {
-                Header::Signing(SigningHeader::decode(&buf)?)
+                Header::Signing(Deserialize::deserialize(&mut de)?)
             }
-            Mode::Signcryption => Header::Signcryption(SigncryptionHeader::decode(&buf)?),
+            Mode::Signcryption => Header::Signcryption(Deserialize::deserialize(&mut de)?),
         };
         Ok((digest, header))
     }

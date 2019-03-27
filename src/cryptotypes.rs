@@ -159,6 +159,13 @@ impl From<MacKey> for auth::Key {
     }
 }
 
+// Convert from &MacKey to auth::Key
+impl From<&MacKey> for auth::Key {
+    fn from(key: &MacKey) -> auth::Key {
+        auth::Key(key.0)
+    }
+}
+
 // Convert from Nonce to box_::Nonce
 impl From<Nonce> for box_::Nonce {
     fn from(nonce: Nonce) -> box_::Nonce {
