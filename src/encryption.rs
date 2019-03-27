@@ -88,10 +88,8 @@ impl EncryptionHeader {
         let mut secret_key_list: Vec<&SecretKey> = self
             .recipients_list
             .iter()
-            .filter_map(|r| r.public_key.clone())
-            .map(|p| keyring.find_encryption_key(&p))
-            .filter(|&s| s.is_some())
-            .map(|s| s.unwrap())
+            .filter_map(|r| r.public_key)
+            .filter_map(|p| keyring.find_encryption_key(&p))
             .collect();
 
         // If we have anonymous recipients, append all the secret
