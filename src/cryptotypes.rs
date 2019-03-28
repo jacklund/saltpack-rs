@@ -1,5 +1,6 @@
 use crate::error::Error;
 use sodiumoxide::crypto::{auth, box_, hash, secretbox};
+use sodiumoxide::utils;
 use std;
 use std::convert::From;
 use std::fmt;
@@ -23,8 +24,16 @@ pub trait FromSlice<T> {
 #[macro_export]
 macro_rules! cryptotype {
     ( $x:ident, $l:expr ) => {
-        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+        #[derive(Clone, Copy, Debug, Hash)]
         pub struct $x(pub [u8; $l]);
+
+        impl ::std::cmp::PartialEq for $x {
+            fn eq(&self, other: &$x) -> bool {
+                use utils::memcmp;
+                memcmp(&self.0, &other.0)
+            }
+        }
+        impl ::std::cmp::Eq for $x {}
 
         impl ::serde::Serialize for $x {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
