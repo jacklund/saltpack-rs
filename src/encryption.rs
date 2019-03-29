@@ -202,18 +202,12 @@ impl EncryptionHandler {
             ));
         }
 
-        let result = secretbox::open(
+        secretbox::open(
             &packet.payload_secretbox,
             &payload_secretbox_nonce.into(),
             &self.payload_key,
-        );
-        if let Err(_) = result {
-            return Err(Error::DecryptionError(
-                "Error opening packet secretbox".to_string(),
-            ));
-        }
-
-        Ok(result.unwrap())
+        )
+        .map_err(|_| Error::DecryptionError("Error opening packet secretbox".to_string()))
     }
 }
 
@@ -250,7 +244,7 @@ fn try_decrypt_payload_key<'a>(
     secret_key_list: &[&'a SecretKey],
     ephemeral_public_key: &PublicKey,
     key_boxes: &[Vec<u8>],
-) -> Option<(u64, &'a SecretKey, SymmetricKey)> {
+) -> Result<Option<(u64, &'a SecretKey, SymmetricKey)>, Error> {
     for secret_key in secret_key_list {
         let precomputed_key = box_::precompute(&ephemeral_public_key, &(*secret_key));
         for (index, key_box) in key_boxes.iter().enumerate() {
@@ -258,16 +252,20 @@ fn try_decrypt_payload_key<'a>(
             if let Ok(payload_key) =
                 box_::open_precomputed(&key_box, &nonce.into(), &precomputed_key)
             {
-                return Some((
-                    index as u64,
-                    secret_key,
-                    SymmetricKey::from_slice(&payload_key).unwrap(),
-                ));
+                return SymmetricKey::from_slice(&payload_key).map_or_else(
+                    || {
+                        Err(Error::KeyLengthError(
+                            secretbox::KEYBYTES,
+                            payload_key.len(),
+                        ))
+                    },
+                    |sk| Ok(Some((index as u64, *secret_key, sk))),
+                );
             }
         }
     }
 
-    None
+    Ok(None)
 }
 
 pub fn encrypt(
@@ -339,7 +337,7 @@ fn generate_recipient_mac_key(
     encrypted_buf.extend_from_slice(&encrypted1[16..]);
     encrypted_buf.extend_from_slice(&encrypted2[16..]);
     let mac_digest: hash::Digest = hash::sha512::hash(&encrypted_buf);
-    MacKey::from_slice(&mac_digest[..32]).unwrap()
+    MacKey::from_slice(&mac_digest[..32]).unwrap() // Ok because size will always be 32
 }
 
 pub fn generate_encryption_mac_keys(
@@ -465,17 +463,19 @@ fn generate_payload_secretbox_nonce(index: u64) -> Nonce {
 }
 
 pub fn create_sender_secretbox(sender: &PublicKey, payload_key: &SymmetricKey) -> Vec<u8> {
-    let nonce: secretbox::Nonce =
-        secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap();
+    let nonce: secretbox::Nonce = get_sender_secretbox_nonce();
     secretbox::seal(sender.as_ref(), &nonce, &payload_key)
+}
+
+fn get_sender_secretbox_nonce() -> secretbox::Nonce {
+    secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap()
 }
 
 pub fn open_sender_secretbox(
     secretbox: &[u8],
     payload_key: &SymmetricKey,
 ) -> Result<PublicKey, Error> {
-    let nonce: secretbox::Nonce =
-        secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap();
+    let nonce: secretbox::Nonce = get_sender_secretbox_nonce();
     if let Ok(sender_public_key) = secretbox::open(secretbox, &nonce, &payload_key) {
         return Ok(
             PublicKey::from_slice(&sender_public_key).ok_or(Error::DecryptionError(

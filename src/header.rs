@@ -91,7 +91,7 @@ impl Header {
     // Decode the header
     pub fn decode(mut reader: &mut Read) -> Result<(hash::Digest, Self), Error> {
         // The header is double-encoded, so we read the length and grab the buffer to decode first
-        let bin_header_len: usize = decode::read_bin_len(&mut reader).unwrap() as usize;
+        let bin_header_len: usize = decode::read_bin_len(&mut reader)? as usize;
         let mut buf = vec![0u8; bin_header_len];
         reader.read_exact(&mut buf)?;
 

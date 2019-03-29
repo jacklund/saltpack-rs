@@ -80,12 +80,6 @@ pub fn read_base64_file(filename: &str) -> Vec<u8> {
     data
 }
 
-fn ct_compare(a: &[u8], b: &[u8]) -> bool {
-    debug_assert!(a.len() == b.len());
-
-    a.iter().zip(b).fold(0, |acc, (a, b)| acc | (a ^ b)) == 0
-}
-
 pub fn cryptobox_zero_bytes(
     nonce: &Nonce,
     public_key: &PublicKey,
