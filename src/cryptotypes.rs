@@ -27,10 +27,10 @@ macro_rules! cryptotype {
         #[derive(Clone, Copy, Debug, Hash)]
         pub struct $x(pub [u8; $l]);
 
+        // constant-time comparison
         impl ::std::cmp::PartialEq for $x {
             fn eq(&self, other: &$x) -> bool {
-                use utils::memcmp;
-                memcmp(&self.0, &other.0)
+                utils::memcmp(&self.0, &other.0)
             }
         }
         impl ::std::cmp::Eq for $x {}
@@ -91,11 +91,7 @@ macro_rules! cryptotype {
         impl crate::cryptotypes::FromSlice<$x> for $x {
             fn from_slice(data: &[u8]) -> Result<Self, Error> {
                 if data.len() != $l {
-                    Err(Error::KeyLengthError(format!(
-                        "Expected length {}, found length {}",
-                        $l,
-                        data.len()
-                    )))
+                    Err(Error::KeyLengthError($l, data.len()))
                 } else {
                     let mut key_data: [u8; $l] = [0; $l];
                     key_data.copy_from_slice(data);
@@ -143,16 +139,16 @@ impl std::hash::Hash for Hash {
 }
 
 // Authenticator
-cryptotype!(Authenticator, 32);
+pub const AUTHENTICATOR_SIZE: usize = 32;
+cryptotype!(Authenticator, AUTHENTICATOR_SIZE);
 
 // MAC
-cryptotype!(MacKey, 32);
+pub const MAC_KEY_SIZE: usize = 32;
+cryptotype!(MacKey, MAC_KEY_SIZE);
 
 // Nonce
-cryptotype!(Nonce, 24);
-
-// Hash
-// cryptotype!(Hash, 64);
+pub const NONCE_SIZE: usize = 24;
+cryptotype!(Nonce, NONCE_SIZE);
 
 // Convert from auth::Tag to Authenticator
 impl From<auth::Tag> for Authenticator {
