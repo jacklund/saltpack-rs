@@ -110,9 +110,13 @@ impl SigncryptionHeader {
             .try_secret_keys(keyring)
             .transpose()
             .unwrap_or_else(|| {
-                self.try_symmetric_keys(resolver).transpose().unwrap_or(Err(
-                    Error::DecryptionError("No key found to decrypt message".to_string()),
-                ))
+                self.try_symmetric_keys(resolver)
+                    .transpose()
+                    .unwrap_or_else(|| {
+                        Err(Error::DecryptionError(
+                            "No key found to decrypt message".to_string(),
+                        ))
+                    })
             })?;
 
         let sender_signing_key_bytes: Vec<u8> = secretbox::open(
@@ -131,17 +135,17 @@ impl SigncryptionHeader {
 
     fn generate_derived_box_key(&self, secret_key: &SecretKey) -> Result<SymmetricKey, Error> {
         let key_data: Vec<u8> = cryptobox_zero_bytes(
-            &Nonce::from_slice(&"saltpack_derived_sboxkey".as_bytes()).unwrap(),
+            &Nonce::from_slice(b"saltpack_derived_sboxkey").unwrap(),
             &self.public_key,
             &secret_key,
         )
         .iter()
         .skip(16)
-        .map(|&byte| byte)
+        .cloned()
         .collect::<Vec<u8>>();
 
         SymmetricKey::from_slice(&key_data)
-            .ok_or(Error::KeyLengthError(secretbox::KEYBYTES, key_data.len()))
+            .ok_or_else(|| Error::KeyLengthError(secretbox::KEYBYTES, key_data.len()))
     }
 
     fn try_secret_keys(&self, keyring: &KeyRing) -> Result<Option<SymmetricKey>, Error> {
@@ -212,8 +216,7 @@ impl fmt::Display for SigncryptionHeader {
             "  sender secretbox: {}",
             base64::encode(&self.sender_secretbox)
         )?;
-        let mut index = 0;
-        for recipient in self.recipients_list.clone() {
+        for (mut index, recipient) in self.recipients_list.clone().iter().enumerate() {
             writeln!(f, "  recipient {}:", index)?;
             writeln!(
                 f,

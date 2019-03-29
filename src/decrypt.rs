@@ -28,7 +28,7 @@ pub enum DecryptedResult {
     },
 }
 
-pub fn decrypt<'a>(
+pub fn decrypt(
     reader: &mut Read,
     keyring: &KeyRing,
     key_resolver: KeyResolver,

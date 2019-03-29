@@ -24,7 +24,7 @@ pub trait FromSlice<T> {
 #[macro_export]
 macro_rules! cryptotype {
     ( $x:ident, $l:expr ) => {
-        #[derive(Clone, Copy, Debug, Hash)]
+        #[derive(Clone, Copy, Debug)]
         pub struct $x(pub [u8; $l]);
 
         // constant-time comparison
@@ -125,10 +125,6 @@ impl PartialEq for Hash {
     #[inline]
     fn eq(&self, other: &Hash) -> bool {
         self.0[..] == other.0[..]
-    }
-    #[inline]
-    fn ne(&self, other: &Hash) -> bool {
-        self.0[..] != other.0[..]
     }
 }
 

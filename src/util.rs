@@ -49,13 +49,13 @@ pub fn read_signing_keys_and_data(
     let mut signing_key_bytes: Vec<u8> = vec![];
     let mut public_signing_key_bytes: Vec<u8> = vec![];
     for line in BufReader::new(File::open(filename).unwrap()).lines() {
-        if public_key_bytes.len() == 0 {
+        if public_key_bytes.is_empty() {
             public_key_bytes = base64::decode(&line.unwrap()).unwrap();
-        } else if private_key_bytes.len() == 0 {
+        } else if private_key_bytes.is_empty() {
             private_key_bytes = base64::decode(&line.unwrap()).unwrap();
-        } else if public_signing_key_bytes.len() == 0 {
+        } else if public_signing_key_bytes.is_empty() {
             public_signing_key_bytes = base64::decode(&line.unwrap()).unwrap();
-        } else if signing_key_bytes.len() == 0 {
+        } else if signing_key_bytes.is_empty() {
             signing_key_bytes = base64::decode(&line.unwrap()).unwrap();
         } else {
             data.append(&mut base64::decode(&line.unwrap()).unwrap());

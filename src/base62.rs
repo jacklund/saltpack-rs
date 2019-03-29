@@ -19,8 +19,8 @@ pub fn add_spaces(input: &str) -> String {
 }
 
 pub fn remove_spaces(input: &str) -> String {
-    if input.contains(" ") {
-        input.replace(" ", "")
+    if input.contains(' ') {
+        input.replace(' ', "")
     } else {
         input.to_string()
     }

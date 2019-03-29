@@ -108,8 +108,8 @@ impl EncryptionHeader {
 
         // Try to decrypt the payload key
         let (recipient_index, secret_key, payload_key) =
-            try_decrypt_payload_key(&secret_key_list, &self.public_key, &key_boxes)?.ok_or(
-                Error::DecryptionError("No secret key found to decrypt message".to_string()),
+            try_decrypt_payload_key(&secret_key_list, &self.public_key, &key_boxes)?.ok_or_else(
+                || Error::DecryptionError("No secret key found to decrypt message".to_string()),
             )?;
 
         // Decrypt the sender secret box
@@ -119,7 +119,7 @@ impl EncryptionHeader {
         let mac_key = generate_recipient_mac_key(
             &header_hash,
             recipient_index,
-            &sender_public_key.into(),
+            &sender_public_key,
             &self.public_key,
             &secret_key,
             &secret_key,
@@ -330,7 +330,7 @@ fn generate_recipient_mac_key(
 
     // Encrypt zero bytes with second public key, the second private key, and modified nonce
     recipient_nonce[15] |= 0x01;
-    let encrypted2 = cryptobox_zero_bytes(&recipient_nonce.into(), public_key2, secret_key2);
+    let encrypted2 = cryptobox_zero_bytes(&recipient_nonce, public_key2, secret_key2);
 
     // Combine parts of the two encrypted tokens and hash that
     let mut encrypted_buf: Vec<u8> = vec![];
@@ -478,11 +478,9 @@ pub fn open_sender_secretbox(
 ) -> Result<PublicKey, Error> {
     let nonce: secretbox::Nonce = get_sender_secretbox_nonce();
     if let Ok(sender_public_key) = secretbox::open(secretbox, &nonce, &payload_key) {
-        return Ok(
-            PublicKey::from_slice(&sender_public_key).ok_or(Error::DecryptionError(
-                "Error decrypting sender secretbox".to_string(),
-            ))?,
-        );
+        return Ok(PublicKey::from_slice(&sender_public_key).ok_or_else(|| {
+            Error::DecryptionError("Error decrypting sender secretbox".to_string())
+        })?);
     }
 
     Err(Error::DecryptionError(
