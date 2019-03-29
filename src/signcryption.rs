@@ -140,9 +140,8 @@ impl SigncryptionHeader {
         .map(|&byte| byte)
         .collect::<Vec<u8>>();
 
-        SymmetricKey::from_slice(&key_data).ok_or(Error::KeyLengthError(
-            "Derived box key had wrong length".to_string(),
-        ))
+        SymmetricKey::from_slice(&key_data)
+            .ok_or(Error::KeyLengthError(secretbox::KEYBYTES, key_data.len()))
     }
 
     fn try_secret_keys(&self, keyring: &KeyRing) -> Result<Option<SymmetricKey>, Error> {
