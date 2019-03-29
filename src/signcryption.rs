@@ -1,9 +1,9 @@
 use crate::cryptotypes::{FromSlice, Nonce};
+use crate::decrypt::{DecryptedResult, KeyResolver};
 use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::{Mode, Version, FORMAT_NAME, VERSION};
 use crate::keyring::KeyRing;
-use crate::process_data::{DecryptedResult, KeyResolver};
 use crate::util::{
     cryptobox_zero_bytes, generate_header_packet, generate_keypair, generate_random_symmetric_key,
     generate_recipient_nonce,
@@ -534,10 +534,10 @@ fn generate_signature_input(
 
 #[cfg(test)]
 mod tests {
+    use crate::decrypt::{decrypt, DecryptedResult};
     use crate::error::Error;
     use crate::header::Header;
     use crate::keyring::KeyRing;
-    use crate::process_data::{process_data, DecryptedResult};
     use crate::signcryption::signcrypt;
     use crate::util::{
         generate_keypair, generate_signing_keypair, read_base64_file, read_signing_keys_and_data,
@@ -579,7 +579,7 @@ mod tests {
             &vec![],
             b"Hello, World!",
         );
-        match process_data(&mut &signcrypted[..], &keyring, mock_key_resolver).unwrap() {
+        match decrypt(&mut &signcrypted[..], &keyring, mock_key_resolver).unwrap() {
             DecryptedResult::SignCryption {
                 plaintext,
                 sender_public_key,
@@ -598,7 +598,7 @@ mod tests {
         recipients.push(public_key);
         let mut keyring: KeyRing = KeyRing::new();
         keyring.add_encryption_keys(public_key, secret_key);
-        match process_data(&mut &data[..], &keyring, mock_key_resolver).unwrap() {
+        match decrypt(&mut &data[..], &keyring, mock_key_resolver).unwrap() {
             DecryptedResult::SignCryption {
                 plaintext,
                 sender_public_key,

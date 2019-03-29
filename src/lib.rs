@@ -17,13 +17,13 @@ extern crate serde_repr;
 
 mod base62;
 mod cryptotypes;
+pub mod decrypt;
 #[macro_use]
 mod header;
 pub mod encryption;
 mod error;
 mod handler;
 mod keyring;
-pub mod process_data;
 pub mod signcryption;
 pub mod signing;
 mod util;

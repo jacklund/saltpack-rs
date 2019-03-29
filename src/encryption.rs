@@ -10,11 +10,11 @@ use std::fmt;
 use std::io::Read;
 
 use crate::cryptotypes::{Authenticator, FromSlice, MacKey, Nonce};
+use crate::decrypt::{DecryptedResult, MessageKeyInfo};
 use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::{Mode, Version, FORMAT_NAME, VERSION};
 use crate::keyring::KeyRing;
-use crate::process_data::{DecryptedResult, MessageKeyInfo};
 use crate::util::{
     cryptobox_zero_bytes, generate_header_packet, generate_keypair, generate_random_symmetric_key,
     generate_recipient_nonce,
@@ -559,11 +559,11 @@ impl fmt::Display for EncryptionHeader {
 
 #[cfg(test)]
 mod tests {
+    use crate::decrypt::{decrypt, DecryptedResult};
     use crate::encryption::{encrypt, EncryptionHeader};
     use crate::error::Error;
     use crate::header::Header;
     use crate::keyring::KeyRing;
-    use crate::process_data::{process_data, DecryptedResult};
     use crate::util::{
         generate_keypair, generate_random_public_key, generate_random_symmetric_key,
         read_base64_file,
@@ -587,7 +587,7 @@ mod tests {
         }
 
         let ciphertext = encrypt(&sender_secret_key, &recipients, b"Hello, World!").unwrap();
-        match process_data(&mut &ciphertext[..], &keyring, mock_key_resolver).unwrap() {
+        match decrypt(&mut &ciphertext[..], &keyring, mock_key_resolver).unwrap() {
             DecryptedResult::Encryption { plaintext, mki } => {
                 assert_eq!("Hello, World!", str::from_utf8(&plaintext).unwrap())
             }
@@ -616,7 +616,7 @@ mod tests {
             keyring.add_encryption_keys(secret_key.public_key(), secret_key);
         }
 
-        match process_data(&mut &data[..], &keyring, mock_key_resolver).unwrap() {
+        match decrypt(&mut &data[..], &keyring, mock_key_resolver).unwrap() {
             DecryptedResult::Encryption { plaintext, mki } => {
                 assert_eq!("hardcoded message v2", str::from_utf8(&plaintext).unwrap())
             }

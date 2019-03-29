@@ -28,7 +28,7 @@ pub enum DecryptedResult {
     },
 }
 
-pub fn process_data<'a>(
+pub fn decrypt<'a>(
     reader: &mut Read,
     keyring: &KeyRing,
     key_resolver: KeyResolver,

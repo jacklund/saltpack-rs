@@ -1,9 +1,9 @@
 use crate::cryptotypes::MacKey;
+use crate::decrypt::DecryptedResult;
 use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::Mode;
 use crate::keyring::KeyRing;
-use crate::process_data::DecryptedResult;
 use base64;
 use sodiumoxide::crypto::box_::PublicKey;
 use sodiumoxide::crypto::hash;

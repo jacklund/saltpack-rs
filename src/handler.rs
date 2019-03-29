@@ -1,5 +1,5 @@
+use crate::decrypt::DecryptedResult;
 use crate::error::Error;
-use crate::process_data::DecryptedResult;
 
 use std::io::Read;
 
