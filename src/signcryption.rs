@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::{Mode, Version, FORMAT_NAME, VERSION};
 use crate::keyring::KeyRing;
-use crate::process_data::KeyResolver;
+use crate::process_data::{DecryptedResult, KeyResolver};
 use crate::util::{
     cryptobox_zero_bytes, generate_header_packet, generate_keypair, generate_random_symmetric_key,
     generate_recipient_nonce,
@@ -296,7 +296,7 @@ impl SigncryptionHandler {
 }
 
 impl Handler for SigncryptionHandler {
-    fn process_payload(&self, reader: &mut Read) -> Result<Vec<u8>, Error> {
+    fn process_payload(&self, reader: &mut Read) -> Result<DecryptedResult, Error> {
         let mut ret: Vec<u8> = vec![];
         let mut de = Deserializer::new(reader);
         let mut packet_index: usize = 0;
@@ -309,7 +309,10 @@ impl Handler for SigncryptionHandler {
             packet_index += 1;
         }
 
-        Ok(ret)
+        Ok(DecryptedResult::SignCryption {
+            plaintext: ret,
+            sender_public_key: self.sender_signing_key,
+        })
     }
 }
 
@@ -535,22 +538,16 @@ mod tests {
     use crate::error::Error;
     use crate::header::Header;
     use crate::keyring::KeyRing;
-    use crate::process_data::process_data;
-    use crate::signcryption::{signcrypt, SigncryptionHeader};
+    use crate::process_data::{process_data, DecryptedResult};
+    use crate::signcryption::signcrypt;
     use crate::util::{
-        generate_keypair, generate_random_signing_key, generate_signing_keypair, read_base64_file,
-        read_signing_keys_and_data,
+        generate_keypair, generate_signing_keypair, read_base64_file, read_signing_keys_and_data,
     };
-    use rmp::decode;
-    use rmp_serde::Deserializer;
-    use serde::Deserialize;
     use sodiumoxide::crypto::box_::PublicKey;
     use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
-    use sodiumoxide::crypto::sign::SecretKey as SigningKey;
-    use std::io::Cursor;
     use std::str;
 
-    fn mock_key_resolver(identifiers: &Vec<Vec<u8>>) -> Result<Vec<Option<SymmetricKey>>, Error> {
+    fn mock_key_resolver(_identifiers: &Vec<Vec<u8>>) -> Result<Vec<Option<SymmetricKey>>, Error> {
         Ok(vec![])
     }
 
@@ -568,7 +565,6 @@ mod tests {
     #[test]
     fn test_signcrypt() {
         let (public_signing_key, signing_key) = generate_signing_keypair();
-        let (_, sender_secret_key) = generate_keypair();
         let mut recipients: Vec<PublicKey> = vec![];
         let mut keyring: KeyRing = KeyRing::new();
         for _ in 0..4 {
@@ -584,21 +580,31 @@ mod tests {
             &vec![],
             b"Hello, World!",
         );
-        let plaintext = process_data(&mut &signcrypted[..], &keyring, mock_key_resolver).unwrap();
-        assert_eq!("Hello, World!", str::from_utf8(&plaintext).unwrap());
+        match process_data(&mut &signcrypted[..], &keyring, mock_key_resolver).unwrap() {
+            DecryptedResult::SignCryption {
+                plaintext,
+                sender_public_key,
+            } => assert_eq!("Hello, World!", str::from_utf8(&plaintext).unwrap()),
+            _ => assert!(false),
+        }
     }
 
     #[test]
     fn test_signcryption_interoperability() {
         // Fixture is data generated from the Go Saltpack library test
         // 'TestSigncryptionBoxKeyHelloWorld'
-        let (public_key, secret_key, public_signing_key, signing_key, data) =
+        let (public_key, secret_key, _public_signing_key, _signing_key, data) =
             read_signing_keys_and_data("fixtures/signcryption.txt");
         let mut recipients: Vec<PublicKey> = vec![];
         recipients.push(public_key);
         let mut keyring: KeyRing = KeyRing::new();
         keyring.add_encryption_keys(public_key, secret_key);
-        let plaintext = process_data(&mut &data[..], &keyring, mock_key_resolver).unwrap();
-        assert_eq!("hello world", str::from_utf8(&plaintext).unwrap());
+        match process_data(&mut &data[..], &keyring, mock_key_resolver).unwrap() {
+            DecryptedResult::SignCryption {
+                plaintext,
+                sender_public_key,
+            } => assert_eq!("hello world", str::from_utf8(&plaintext).unwrap()),
+            _ => assert!(false),
+        }
     }
 }

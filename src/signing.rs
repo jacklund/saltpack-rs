@@ -3,6 +3,7 @@ use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::Mode;
 use crate::keyring::KeyRing;
+use crate::process_data::DecryptedResult;
 use base64;
 use sodiumoxide::crypto::box_::PublicKey;
 use sodiumoxide::crypto::hash;
@@ -75,7 +76,7 @@ impl SigningHandler {
 }
 
 impl Handler for SigningHandler {
-    fn process_payload(&self, reader: &mut Read) -> Result<Vec<u8>, Error> {
+    fn process_payload(&self, reader: &mut Read) -> Result<DecryptedResult, Error> {
         unimplemented!()
     }
 }

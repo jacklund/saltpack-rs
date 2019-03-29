@@ -14,6 +14,7 @@ use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::{Mode, Version, FORMAT_NAME, VERSION};
 use crate::keyring::KeyRing;
+use crate::process_data::{DecryptedResult, MessageKeyInfo};
 use crate::util::{
     cryptobox_zero_bytes, generate_header_packet, generate_keypair, generate_random_symmetric_key,
     generate_recipient_nonce,
@@ -107,7 +108,7 @@ impl EncryptionHeader {
 
         // Try to decrypt the payload key
         let (recipient_index, secret_key, payload_key) =
-            try_decrypt_payload_key(&secret_key_list, &self.public_key, &key_boxes).ok_or(
+            try_decrypt_payload_key(&secret_key_list, &self.public_key, &key_boxes)?.ok_or(
                 Error::DecryptionError("No secret key found to decrypt message".to_string()),
             )?;
 
@@ -124,12 +125,28 @@ impl EncryptionHeader {
             &secret_key,
         );
 
+        let named_receivers: Vec<Vec<u8>> = self
+            .recipients_list
+            .iter()
+            .map(|rp| rp.public_key.unwrap().as_ref().to_vec())
+            .collect();
+
+        let num_anon_receivers: usize = self.recipients_list.len() - named_receivers.len();
+
+        let mki = MessageKeyInfo {
+            sender_public_key: Some(sender_public_key),
+            receiver_private_key: Some(secret_key_list[recipient_index as usize].clone()),
+            named_receivers,
+            num_anon_receivers,
+        };
+
         Ok(Box::new(EncryptionHandler::new(
             recipient_index as usize,
             payload_key,
             sender_public_key,
             mac_key,
             header_hash,
+            mki,
         )))
     }
 }
@@ -141,6 +158,7 @@ pub struct EncryptionHandler {
     pub sender_public_key: PublicKey,
     pub mac_key: MacKey,
     pub header_hash: hash::Digest,
+    pub message_key_info: MessageKeyInfo,
 }
 
 impl EncryptionHandler {
@@ -150,6 +168,7 @@ impl EncryptionHandler {
         sender_public_key: PublicKey,
         mac_key: MacKey,
         header_hash: hash::Digest,
+        message_key_info: MessageKeyInfo,
     ) -> EncryptionHandler {
         EncryptionHandler {
             recipient_index,
@@ -157,6 +176,7 @@ impl EncryptionHandler {
             sender_public_key,
             mac_key,
             header_hash,
+            message_key_info,
         }
     }
 
@@ -198,20 +218,23 @@ impl EncryptionHandler {
 }
 
 impl Handler for EncryptionHandler {
-    fn process_payload(&self, reader: &mut Read) -> Result<Vec<u8>, Error> {
-        let mut ret: Vec<u8> = vec![];
+    fn process_payload(&self, reader: &mut Read) -> Result<DecryptedResult, Error> {
+        let mut data: Vec<u8> = vec![];
         let mut de = Deserializer::new(reader);
         let mut packet_index: usize = 0;
         loop {
             let packet: PayloadPacket = Deserialize::deserialize(&mut de)?;
-            ret.extend(self.process_packet(&packet, packet_index)?);
+            data.extend(self.process_packet(&packet, packet_index)?);
             if packet.final_flag {
                 break;
             }
             packet_index += 1;
         }
 
-        Ok(ret)
+        Ok(DecryptedResult::Encryption {
+            plaintext: data,
+            mki: self.message_key_info.clone(),
+        })
     }
 }
 
@@ -247,7 +270,11 @@ fn try_decrypt_payload_key<'a>(
     None
 }
 
-pub fn encrypt(sender_secret_key: &SecretKey, recipients: &[PublicKey], message: &[u8]) -> Vec<u8> {
+pub fn encrypt(
+    sender_secret_key: &SecretKey,
+    recipients: &[PublicKey],
+    message: &[u8],
+) -> Result<Vec<u8>, Error> {
     // Generate payload key
     let payload_key: SymmetricKey = generate_random_symmetric_key();
 
@@ -282,12 +309,10 @@ pub fn encrypt(sender_secret_key: &SecretKey, recipients: &[PublicKey], message:
     let mut data: Vec<u8> = vec![];
     data.extend(header_packet);
     for payload_packet in payload_packets {
-        payload_packet
-            .serialize(&mut Serializer::new(&mut data))
-            .unwrap();
+        payload_packet.serialize(&mut Serializer::new(&mut data))?;
     }
 
-    data
+    Ok(data)
 }
 
 fn generate_recipient_mac_key(
@@ -538,20 +563,16 @@ mod tests {
     use crate::error::Error;
     use crate::header::Header;
     use crate::keyring::KeyRing;
-    use crate::process_data::process_data;
+    use crate::process_data::{process_data, DecryptedResult};
     use crate::util::{
         generate_keypair, generate_random_public_key, generate_random_symmetric_key,
         read_base64_file,
     };
-    use base64;
     use hex;
-    use rmp::decode;
     use rmp_serde::{Deserializer, Serializer};
     use serde::{Deserialize, Serialize};
     use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
     use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
-    use sodiumoxide::crypto::{box_, scalarmult};
-    use std::io::Cursor;
     use std::str;
 
     #[test]
@@ -565,18 +586,22 @@ mod tests {
             keyring.add_encryption_keys(public_key, secret_key);
         }
 
-        let ciphertext = encrypt(&sender_secret_key, &recipients, b"Hello, World!");
-        let plaintext = process_data(&mut &ciphertext[..], &keyring, mock_key_resolver).unwrap();
-        assert_eq!("Hello, World!", str::from_utf8(&plaintext).unwrap());
+        let ciphertext = encrypt(&sender_secret_key, &recipients, b"Hello, World!").unwrap();
+        match process_data(&mut &ciphertext[..], &keyring, mock_key_resolver).unwrap() {
+            DecryptedResult::Encryption { plaintext, mki } => {
+                assert_eq!("Hello, World!", str::from_utf8(&plaintext).unwrap())
+            }
+            _ => assert!(false),
+        }
     }
 
-    fn mock_key_resolver(identifiers: &Vec<Vec<u8>>) -> Result<Vec<Option<SymmetricKey>>, Error> {
+    fn mock_key_resolver(_identifiers: &Vec<Vec<u8>>) -> Result<Vec<Option<SymmetricKey>>, Error> {
         Ok(vec![])
     }
 
     #[test]
     fn test_decrypt() {
-        let mut data: Vec<u8> = read_base64_file("fixtures/decrypt.txt");
+        let data: Vec<u8> = read_base64_file("fixtures/decrypt.txt");
         let secret_key_strings = [
             "16c22cb65728ded9214c8e4525decc20f6ad95fd43a503deaecdfbcd79d39d15",
             "fceb2cb2c77b22d47a779461c7a963a11759a3f98a437d542e3cdde5d0c9bea6",
@@ -591,8 +616,12 @@ mod tests {
             keyring.add_encryption_keys(secret_key.public_key(), secret_key);
         }
 
-        let plaintext = process_data(&mut &data[..], &keyring, mock_key_resolver).unwrap();
-        assert_eq!("hardcoded message v2", str::from_utf8(&plaintext).unwrap());
+        match process_data(&mut &data[..], &keyring, mock_key_resolver).unwrap() {
+            DecryptedResult::Encryption { plaintext, mki } => {
+                assert_eq!("hardcoded message v2", str::from_utf8(&plaintext).unwrap())
+            }
+            _ => assert!(false),
+        }
     }
 
     #[test]
