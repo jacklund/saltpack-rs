@@ -463,9 +463,10 @@ fn generate_payload_packets(
 
     // 1 MB max chunk size
     let chunk_size: usize = 1024 * 1024;
+    let num_chunks: usize = (message.len() as f32 / chunk_size as f32).ceil() as usize;
     for (index, chunk) in message.chunks(chunk_size).enumerate() {
         // Flag if this is the final chunk
-        let final_flag: bool = chunk.len() < chunk_size;
+        let final_flag: bool = index == num_chunks - 1;
 
         let packet_nonce: Nonce = generate_packet_nonce(index, final_flag, header_hash);
 
@@ -478,7 +479,7 @@ fn generate_payload_packets(
 
         let generated_signature = sign::sign_detached(&signature_input, &signing_key)[..].to_vec();
         let mut chunk_to_encrypt: Vec<u8> = generated_signature;
-        chunk_to_encrypt.extend(message);
+        chunk_to_encrypt.extend(chunk);
 
         let signcrypted_chunk: Vec<u8> =
             secretbox::seal(&chunk_to_encrypt, &packet_nonce.into(), payload_key);

@@ -381,6 +381,7 @@ fn generate_payload_packets(
 
     // 1 MB max chunk size
     let chunk_size: usize = 1024 * 1024;
+    let num_chunks: usize = (message.len() as f32 / chunk_size as f32).ceil() as usize;
     for (index, chunk) in message.chunks(chunk_size).enumerate() {
         // Encrypt the chunk with the payload key and generated nonce
         let payload_secretbox_nonce: Nonce = generate_payload_secretbox_nonce(index as u64);
@@ -388,7 +389,7 @@ fn generate_payload_packets(
             secretbox::seal(&chunk, &payload_secretbox_nonce.into(), &payload_key);
 
         // Flag if this is the final chunk
-        let final_flag: bool = chunk.len() < chunk_size;
+        let final_flag: bool = index == num_chunks - 1;
 
         // Authenticators for each recipient
         let authenticators: Vec<Authenticator> = generate_authenticators(
