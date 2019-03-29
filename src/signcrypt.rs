@@ -538,7 +538,7 @@ mod tests {
     use crate::error::Error;
     use crate::header::Header;
     use crate::keyring::KeyRing;
-    use crate::signcryption::signcrypt;
+    use crate::signcrypt::signcrypt;
     use crate::util::{
         generate_keypair, generate_signing_keypair, read_base64_file, read_signing_keys_and_data,
     };

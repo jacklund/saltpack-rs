@@ -1,9 +1,9 @@
 use crate::decrypt::KeyResolver;
-use crate::encryption::EncryptionHeader;
+use crate::encrypt::EncryptionHeader;
 use crate::error::Error;
 use crate::handler::Handler;
 use crate::keyring::KeyRing;
-use crate::signcryption::SigncryptionHeader;
+use crate::signcrypt::SigncryptionHeader;
 use crate::signing::SigningHeader;
 use rmp::decode;
 use rmp_serde;

@@ -20,10 +20,10 @@ mod cryptotypes;
 pub mod decrypt;
 #[macro_use]
 mod header;
-pub mod encryption;
+pub mod encrypt;
 mod error;
 mod handler;
 mod keyring;
-pub mod signcryption;
+pub mod signcrypt;
 pub mod signing;
 mod util;

@@ -560,7 +560,7 @@ impl fmt::Display for EncryptionHeader {
 #[cfg(test)]
 mod tests {
     use crate::decrypt::{decrypt, DecryptedResult};
-    use crate::encryption::{encrypt, EncryptionHeader};
+    use crate::encrypt::{encrypt, EncryptionHeader};
     use crate::error::Error;
     use crate::header::Header;
     use crate::keyring::KeyRing;
