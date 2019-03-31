@@ -3,19 +3,13 @@ use sodiumoxide::crypto::sign::PublicKey as PublicSigningKey;
 use sodiumoxide::crypto::sign::SecretKey as SigningKey;
 use std::collections::HashMap;
 
+#[derive(Default)]
 pub struct KeyRing {
     encryption_keys: HashMap<PublicKey, SecretKey>,
     signing_keys: HashMap<PublicSigningKey, SigningKey>,
 }
 
 impl KeyRing {
-    pub fn new() -> Self {
-        KeyRing {
-            encryption_keys: HashMap::new(),
-            signing_keys: HashMap::new(),
-        }
-    }
-
     pub fn add_encryption_keys(&mut self, public_key: PublicKey, secret_key: SecretKey) {
         self.encryption_keys.insert(public_key, secret_key);
     }

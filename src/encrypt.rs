@@ -578,7 +578,7 @@ mod tests {
     fn test_encrypt() {
         let (_, sender_secret_key) = generate_keypair();
         let mut recipients: Vec<PublicKey> = vec![];
-        let mut keyring: KeyRing = KeyRing::new();
+        let mut keyring: KeyRing = KeyRing::default();
         for _ in 0..4 {
             let (public_key, secret_key) = generate_keypair();
             recipients.push(public_key);
@@ -609,7 +609,7 @@ mod tests {
         let secret_keys = secret_key_strings
             .iter()
             .map(|sks| hex::decode(sks).unwrap());
-        let mut keyring: KeyRing = KeyRing::new();
+        let mut keyring: KeyRing = KeyRing::default();
         for secret_key_bytes in secret_keys {
             let secret_key: SecretKey = SecretKey::from_slice(&secret_key_bytes).unwrap();
             keyring.add_encryption_keys(secret_key.public_key(), secret_key);
