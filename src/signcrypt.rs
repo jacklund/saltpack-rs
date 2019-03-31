@@ -24,6 +24,7 @@ use sodiumoxide::crypto::sign::SecretKey as SigningKey;
 use sodiumoxide::crypto::{hash, secretbox, sign};
 use std::fmt;
 use std::io::Read;
+use std::iter;
 
 type HmacSha512 = Hmac<Sha512>;
 
@@ -51,18 +52,32 @@ const SYMMETRIC_HMAC_KEY: &[u8] = b"saltpack signcryption derived symmetric key"
 
 impl SigncryptionHeader {
     pub fn new(
-        public_signing_key: &PublicSigningKey,
+        public_signing_key: Option<PublicSigningKey>,
         recipient_public_keys: &[PublicKey],
         recipient_symmetric_keys: &[ReceiverSymmetricKey],
         payload_key: &SymmetricKey,
         ephemeral_public_key: &PublicKey,
         ephemeral_secret_key: &SecretKey,
     ) -> Self {
-        let sender_secretbox = secretbox::seal(
-            &public_signing_key[..],
-            &secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap(),
-            &payload_key,
-        );
+        let sender_secretbox: Vec<u8>;
+        match public_signing_key {
+            Some(public_signing_key) => {
+                sender_secretbox = secretbox::seal(
+                    &public_signing_key[..],
+                    &secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap(),
+                    &payload_key,
+                );
+            }
+            None => {
+                sender_secretbox = secretbox::seal(
+                    &iter::repeat(0u8)
+                        .take(sign::PUBLICKEYBYTES)
+                        .collect::<Vec<u8>>(),
+                    &secretbox::Nonce::from_slice(b"saltpack_sender_key_sbox").unwrap(),
+                    &payload_key,
+                );
+            }
+        };
 
         // Combine the keys so we can shuffle them all
         // Can't use anything with an iterator, because we'd need to
@@ -216,7 +231,7 @@ impl fmt::Display for SigncryptionHeader {
             "  sender secretbox: {}",
             base64::encode(&self.sender_secretbox)
         )?;
-        for (mut index, recipient) in self.recipients_list.clone().iter().enumerate() {
+        for (index, recipient) in self.recipients_list.clone().iter().enumerate() {
             writeln!(f, "  recipient {}:", index)?;
             writeln!(
                 f,
@@ -228,7 +243,6 @@ impl fmt::Display for SigncryptionHeader {
                 "    payload key box: {}",
                 base64::encode(&recipient.payload_key_box)
             )?;
-            index += 1;
         }
 
         Ok(())
@@ -265,7 +279,14 @@ impl SigncryptionHandler {
         let decrypted: Vec<u8> = self.decrypt_packet(packet, &packet_nonce)?;
         let signature: Vec<u8> = decrypted[..64].to_vec();
         let plaintext: Vec<u8> = decrypted[64..].to_vec();
-        if self.sender_signing_key[..].iter().any(|b| *b != 0) {
+        // Could use any() here, but want this to be constant-time
+        // to avoid possibility of timing attack
+        if !self.sender_signing_key[..]
+            .iter()
+            .filter(|&b| *b != 0u8)
+            .count()
+            == 0
+        {
             let signature_input: Vec<u8> = generate_signature_input(
                 &self.header_hash,
                 &packet_nonce,
@@ -416,8 +437,8 @@ impl RecipientKey for ReceiverSymmetricKey {
 }
 
 pub fn signcrypt(
-    signing_key: &SigningKey,
-    public_signing_key: &PublicSigningKey,
+    signing_key: Option<SigningKey>,
+    public_signing_key: Option<PublicSigningKey>,
     recipient_public_keys: &[PublicKey],
     recipient_symmetric_keys: &[ReceiverSymmetricKey],
     message: &[u8],
@@ -429,7 +450,7 @@ pub fn signcrypt(
     let (ephemeral_public_key, ephemeral_secret_key) = generate_keypair();
 
     let header: SigncryptionHeader = SigncryptionHeader::new(
-        &public_signing_key,
+        public_signing_key,
         recipient_public_keys,
         recipient_symmetric_keys,
         &payload_key,
@@ -457,7 +478,7 @@ pub fn signcrypt(
 
 fn generate_payload_packets(
     message: &[u8],
-    signing_key: &SigningKey,
+    signing_key: Option<SigningKey>,
     payload_key: &SymmetricKey,
     header_hash: &hash::Digest,
 ) -> Vec<PayloadPacket> {
@@ -473,14 +494,25 @@ fn generate_payload_packets(
 
         let packet_nonce: Nonce = generate_packet_nonce(index, final_flag, header_hash);
 
-        let signature_input: Vec<u8> = generate_signature_input(
-            header_hash,
-            &packet_nonce,
-            final_flag,
-            &hash::sha512::hash(message),
-        );
+        let generated_signature: Vec<u8>;
+        match signing_key {
+            Some(ref signing_key) => {
+                let signature_input: Vec<u8> = generate_signature_input(
+                    header_hash,
+                    &packet_nonce,
+                    final_flag,
+                    &hash::sha512::hash(message),
+                );
 
-        let generated_signature = sign::sign_detached(&signature_input, &signing_key)[..].to_vec();
+                generated_signature =
+                    sign::sign_detached(&signature_input, &signing_key)[..].to_vec();
+            }
+            None => {
+                generated_signature = iter::repeat(0u8)
+                    .take(sign::SIGNATUREBYTES)
+                    .collect::<Vec<u8>>();
+            }
+        };
         let mut chunk_to_encrypt: Vec<u8> = generated_signature;
         chunk_to_encrypt.extend(chunk);
 
@@ -569,7 +601,7 @@ mod tests {
     fn test_signcrypt() {
         let (public_signing_key, signing_key) = generate_signing_keypair();
         let mut recipients: Vec<PublicKey> = vec![];
-        let mut keyring: KeyRing = KeyRing::new();
+        let mut keyring: KeyRing = KeyRing::default();
         for _ in 0..4 {
             let (public_key, secret_key) = generate_keypair();
             recipients.push(public_key);
@@ -577,12 +609,33 @@ mod tests {
         }
 
         let signcrypted: Vec<u8> = signcrypt(
-            &signing_key,
-            &public_signing_key,
+            Some(signing_key),
+            Some(public_signing_key),
             &recipients,
             &vec![],
             b"Hello, World!",
         );
+        match decrypt(&mut &signcrypted[..], &keyring, mock_key_resolver).unwrap() {
+            DecryptedResult::SignCryption {
+                plaintext,
+                sender_public_key,
+            } => assert_eq!("Hello, World!", str::from_utf8(&plaintext).unwrap()),
+            _ => assert!(false),
+        }
+    }
+
+    #[test]
+    fn test_signcrypt_anonymous_sender() {
+        let (public_signing_key, signing_key) = generate_signing_keypair();
+        let mut recipients: Vec<PublicKey> = vec![];
+        let mut keyring: KeyRing = KeyRing::default();
+        for _ in 0..4 {
+            let (public_key, secret_key) = generate_keypair();
+            recipients.push(public_key);
+            keyring.add_encryption_keys(public_key, secret_key);
+        }
+
+        let signcrypted: Vec<u8> = signcrypt(None, None, &recipients, &vec![], b"Hello, World!");
         match decrypt(&mut &signcrypted[..], &keyring, mock_key_resolver).unwrap() {
             DecryptedResult::SignCryption {
                 plaintext,
@@ -600,7 +653,7 @@ mod tests {
             read_signing_keys_and_data("fixtures/signcryption.txt");
         let mut recipients: Vec<PublicKey> = vec![];
         recipients.push(public_key);
-        let mut keyring: KeyRing = KeyRing::new();
+        let mut keyring: KeyRing = KeyRing::default();
         keyring.add_encryption_keys(public_key, secret_key);
         match decrypt(&mut &data[..], &keyring, mock_key_resolver).unwrap() {
             DecryptedResult::SignCryption {
