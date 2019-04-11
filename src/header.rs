@@ -1,8 +1,5 @@
-use crate::decrypt::KeyResolver;
 use crate::encrypt::EncryptionHeader;
 use crate::error::Error;
-use crate::handler::Handler;
-use crate::keyring::KeyRing;
 use crate::signcrypt::SigncryptionHeader;
 use crate::signing::SigningHeader;
 use rmp::decode;
@@ -68,7 +65,7 @@ pub struct CommonHeader {
 }
 
 impl CommonHeader {
-    fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         if self.format_name != FORMAT_NAME {
             return Err(Error::ValidationError(format!(
                 "Unknown format name {}",
@@ -115,24 +112,6 @@ impl Header {
             Mode::Signcryption => Header::Signcryption(Deserialize::deserialize(&mut de)?),
         };
         Ok((digest, header))
-    }
-
-    // Get the handler, which is used to decrypt the payload
-    pub fn get_handler(
-        &self,
-        header_hash: hash::Digest,
-        keyring: &KeyRing,
-        resolver: KeyResolver,
-    ) -> Result<Box<Handler>, Error> {
-        match self {
-            Header::Encryption(encryption_header) => {
-                encryption_header.get_handler(header_hash, keyring)
-            }
-            Header::Signing(signing_header) => signing_header.get_handler(header_hash, keyring),
-            Header::Signcryption(signcryption_header) => {
-                signcryption_header.get_handler(header_hash, keyring, resolver)
-            }
-        }
     }
 }
 

@@ -1,5 +1,5 @@
-use crate::cryptotypes::MacKey;
-use crate::decrypt::DecryptedResult;
+use crate::cryptotypes::{MacKey, Nonce};
+use crate::decrypt::{DecryptedResult, KeyResolver};
 use crate::error::Error;
 use crate::handler::Handler;
 use crate::header::Mode;
@@ -8,6 +8,8 @@ use base64;
 use sodiumoxide::crypto::box_::PublicKey;
 use sodiumoxide::crypto::hash;
 use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
+use sodiumoxide::crypto::sign::PublicKey as PublicSigningKey;
+use sodiumoxide::crypto::sign::SecretKey as SigningKey;
 use std::fmt;
 use std::io::Read;
 
@@ -16,8 +18,8 @@ pub struct SigningHeader {
     format_name: String,
     version: [u32; 2],
     mode: Mode,
-    sender_public_key: PublicKey,
-    nonce: [u8; 32],
+    sender_public_key: PublicSigningKey,
+    nonce: Nonce,
 }
 
 impl SigningHeader {
@@ -51,32 +53,12 @@ impl fmt::Display for SigningHeader {
     }
 }
 
-#[derive(Debug)]
-pub struct SigningHandler {
-    pub payload_key: SymmetricKey,
-    pub sender_public_key: PublicKey,
-    pub mac_key: MacKey,
-    pub header_hash: hash::Digest,
-}
-
-impl SigningHandler {
-    pub fn new(
-        payload_key: SymmetricKey,
-        sender_public_key: PublicKey,
-        mac_key: MacKey,
-        header_hash: hash::Digest,
-    ) -> SigningHandler {
-        SigningHandler {
-            payload_key,
-            sender_public_key,
-            mac_key,
-            header_hash,
-        }
-    }
-}
-
-impl Handler for SigningHandler {
-    fn process_payload(&self, reader: &mut Read) -> Result<DecryptedResult, Error> {
-        unimplemented!()
-    }
+pub fn decrypt_payload(
+    reader: &mut Read,
+    header: &SigningHeader,
+    header_hash: &hash::Digest,
+    keyring: &KeyRing,
+    resolver: KeyResolver,
+) -> Result<DecryptedResult, Error> {
+    unimplemented!()
 }
