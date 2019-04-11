@@ -41,7 +41,21 @@ pub fn decrypt(
     key_resolver: KeyResolver,
 ) -> Result<DecryptedResult, Error> {
     let (header, header_hash) = parse_header(reader)?;
-    decrypt_payload(reader, &header, &header_hash, keyring, key_resolver)
+    match header {
+        Header::Encryption(encryption_header) => {
+            encrypt::decrypt_payload(reader, &encryption_header, &header_hash, keyring)
+        }
+        Header::Signcryption(signecryption_header) => signcrypt::decrypt_payload(
+            reader,
+            &signecryption_header,
+            &header_hash,
+            keyring,
+            key_resolver,
+        ),
+        Header::Signing(signing_header) => {
+            signing::decrypt_payload(reader, &signing_header, &header_hash, keyring, key_resolver)
+        }
+    }
 }
 
 // Decode the header
@@ -71,28 +85,4 @@ pub fn parse_header(mut reader: &mut Read) -> Result<(Header, hash::Digest), Err
         Mode::Signcryption => Header::Signcryption(Deserialize::deserialize(&mut de)?),
     };
     Ok((header, digest))
-}
-
-fn decrypt_payload(
-    reader: &mut Read,
-    header: &Header,
-    header_hash: &hash::Digest,
-    keyring: &KeyRing,
-    key_resolver: KeyResolver,
-) -> Result<DecryptedResult, Error> {
-    match header {
-        Header::Encryption(encryption_header) => {
-            encrypt::decrypt_payload(reader, encryption_header, header_hash, keyring)
-        }
-        Header::Signcryption(signecryption_header) => signcrypt::decrypt_payload(
-            reader,
-            signecryption_header,
-            header_hash,
-            keyring,
-            key_resolver,
-        ),
-        Header::Signing(signing_header) => {
-            signing::decrypt_payload(reader, signing_header, header_hash, keyring, key_resolver)
-        }
-    }
 }
