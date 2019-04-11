@@ -86,12 +86,10 @@ impl EncryptionHeader {
     }
 }
 
-pub fn decrypt_payload(
-    reader: &mut Read,
+fn get_payload_key<'a>(
     header: &EncryptionHeader,
-    header_hash: &hash::Digest,
-    keyring: &KeyRing,
-) -> Result<DecryptedResult, Error> {
+    keyring: &'a KeyRing,
+) -> Result<(u64, &'a SecretKey, SymmetricKey), Error> {
     // Are any of our recipients anonymous?
     // let has_anonymous = header.recipients_list.iter().any(|r| r.public_key.is_none());
     let has_anonymous = false;
@@ -119,10 +117,18 @@ pub fn decrypt_payload(
         .collect();
 
     // Try to decrypt the payload key
-    let (recipient_index, secret_key, payload_key) =
-        try_decrypt_payload_key(&secret_key_list, &header.public_key, &key_boxes)?.ok_or_else(
-            || Error::DecryptionError("No secret key found to decrypt message".to_string()),
-        )?;
+    try_decrypt_payload_key(&secret_key_list, &header.public_key, &key_boxes)?
+        .ok_or_else(|| Error::DecryptionError("No secret key found to decrypt message".to_string()))
+}
+
+pub fn decrypt_payload(
+    reader: &mut Read,
+    header: &EncryptionHeader,
+    header_hash: &hash::Digest,
+    keyring: &KeyRing,
+) -> Result<DecryptedResult, Error> {
+    // Try to decrypt the payload key
+    let (recipient_index, secret_key, payload_key) = get_payload_key(header, keyring)?;
 
     // Decrypt the sender secret box
     let sender_public_key = open_sender_secretbox(&header.sender_secretbox, &payload_key)?;
@@ -137,6 +143,7 @@ pub fn decrypt_payload(
         &secret_key,
     );
 
+    // Generate the MessageKeyInfo
     let named_receivers: Vec<Vec<u8>> = header
         .recipients_list
         .iter()
@@ -147,11 +154,12 @@ pub fn decrypt_payload(
 
     let mki = MessageKeyInfo {
         sender_public_key: Some(sender_public_key),
-        receiver_private_key: Some(secret_key_list[recipient_index as usize].clone()),
+        receiver_private_key: Some(secret_key.clone()),
         named_receivers,
         num_anon_receivers,
     };
 
+    // Parse each payload packet
     let mut data: Vec<u8> = vec![];
     let mut de = Deserializer::new(reader);
     let mut packet_index: usize = 0;
