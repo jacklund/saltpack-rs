@@ -466,25 +466,6 @@ pub fn open_sender_secretbox(
     ))
 }
 
-pub fn decrypt_payload_key_for_recipient(
-    public_key: &box_::PublicKey,
-    secret_key: &SecretKey,
-    payload_key_box_list: &[Vec<u8>],
-) -> Option<Vec<u8>> {
-    // Precompute the shared secret
-    let key: box_::PrecomputedKey = box_::precompute(&public_key, &secret_key);
-
-    // Try to open each payload key box in turn
-    for (recipient_index, payload_key_box) in payload_key_box_list.iter().enumerate() {
-        let nonce = generate_recipient_nonce(recipient_index as u64);
-        if let Ok(payload_key) = box_::open_precomputed(&payload_key_box, &nonce.into(), &key) {
-            return Some(payload_key);
-        }
-    }
-
-    None
-}
-
 pub fn encrypt_payload_key_for_recipient(
     recipient: &PublicKey,
     recipient_index: u64,
