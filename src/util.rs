@@ -1,32 +1,38 @@
-use crate::cryptotypes::{FromSlice, Nonce};
+use crate::cryptotypes::{FromSlice, Nonce, SigningNonce, SIGNING_NONCE_SIZE};
 use base64;
 use byteorder::{BigEndian, WriteBytesExt};
 use rand;
 use rmp::encode;
 use rmp_serde::Serializer;
 use serde::Serialize;
-use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
+use sodiumoxide::crypto::box_::{PublicKey, SecretKey, PUBLICKEYBYTES};
 use sodiumoxide::crypto::secretbox::Key as SymmetricKey;
+use sodiumoxide::crypto::secretbox::KEYBYTES as SYMMETRIC_KEY_BYTES;
 use sodiumoxide::crypto::sign::PublicKey as PublicSigningKey;
 use sodiumoxide::crypto::sign::SecretKey as SigningKey;
+use sodiumoxide::crypto::sign::SECRETKEYBYTES as SIGNING_KEY_BYTES;
 use sodiumoxide::crypto::{box_, hash, sign};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::iter;
 
 pub fn generate_random_public_key() -> PublicKey {
-    PublicKey::from_slice(&generate_random_key(32)).unwrap()
+    PublicKey::from_slice(&generate_random_data(PUBLICKEYBYTES)).unwrap()
 }
 
 pub fn generate_random_symmetric_key() -> SymmetricKey {
-    SymmetricKey::from_slice(&generate_random_key(32)).unwrap()
+    SymmetricKey::from_slice(&generate_random_data(SYMMETRIC_KEY_BYTES)).unwrap()
+}
+
+pub fn generate_random_signing_nonce() -> SigningNonce {
+    SigningNonce::from_slice(&generate_random_data(SIGNING_NONCE_SIZE)).unwrap()
 }
 
 pub fn generate_random_signing_key() -> SigningKey {
-    SigningKey::from_slice(&generate_random_key(64)).unwrap()
+    SigningKey::from_slice(&generate_random_data(SIGNING_KEY_BYTES)).unwrap()
 }
 
-fn generate_random_key(len: usize) -> Vec<u8> {
+pub fn generate_random_data(len: usize) -> Vec<u8> {
     iter::repeat_with(rand::random::<u8>)
         .take(len)
         .collect::<Vec<u8>>()

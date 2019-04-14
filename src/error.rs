@@ -14,6 +14,7 @@ pub enum Error {
     MsgPackDecodeError(Box<std::error::Error>),
     MsgPackEncodeError(encode::Error),
     ResolverError(String),
+    SignatureNotVerified,
     ValidationError(String),
 }
 
@@ -32,6 +33,7 @@ impl fmt::Display for Error {
             Error::MsgPackDecodeError(e) => write!(f, "Error decoding msgpack: {}", e),
             Error::MsgPackEncodeError(e) => write!(f, "Error encoding msgpack: {}", e),
             Error::ResolverError(msg) => write!(f, "Resolver error: {}", msg),
+            Error::SignatureNotVerified => write!(f, "Signature on message failed verification"),
             Error::ValidationError(msg) => write!(f, "Validation error: {}", msg),
         }
     }

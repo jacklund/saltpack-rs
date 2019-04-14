@@ -1,12 +1,11 @@
 use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
 use sodiumoxide::crypto::sign::PublicKey as PublicSigningKey;
-use sodiumoxide::crypto::sign::SecretKey as SigningKey;
 use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct KeyRing {
     encryption_keys: HashMap<PublicKey, SecretKey>,
-    signing_keys: HashMap<PublicSigningKey, SigningKey>,
+    signing_keys: HashMap<PublicKey, PublicSigningKey>,
 }
 
 impl KeyRing {
@@ -22,11 +21,11 @@ impl KeyRing {
         self.encryption_keys.values().collect()
     }
 
-    pub fn add_signing_keys(&mut self, public_key: PublicSigningKey, signing_key: SigningKey) {
+    pub fn add_signing_keys(&mut self, public_key: PublicKey, signing_key: PublicSigningKey) {
         self.signing_keys.insert(public_key, signing_key);
     }
 
-    pub fn find_signing_key(&self, public_key: &PublicSigningKey) -> Option<&SigningKey> {
+    pub fn find_signing_key(&self, public_key: &PublicKey) -> Option<&PublicSigningKey> {
         self.signing_keys.get(public_key)
     }
 }

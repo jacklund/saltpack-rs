@@ -146,6 +146,10 @@ cryptotype!(MacKey, MAC_KEY_SIZE);
 pub const NONCE_SIZE: usize = 24;
 cryptotype!(Nonce, NONCE_SIZE);
 
+// Signing Nonce
+pub const SIGNING_NONCE_SIZE: usize = 16; // The docs claim this is 32 bytes, but they are wrong!
+cryptotype!(SigningNonce, SIGNING_NONCE_SIZE);
+
 // Convert from auth::Tag to Authenticator
 impl From<auth::Tag> for Authenticator {
     fn from(tag: auth::Tag) -> Authenticator {

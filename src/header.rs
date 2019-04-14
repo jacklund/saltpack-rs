@@ -124,3 +124,32 @@ impl fmt::Display for Header {
         }
     }
 }
+
+// Decode the header
+pub fn parse_header(mut reader: &mut Read) -> Result<(Header, hash::Digest), Error> {
+    // The header is double-encoded, so we read the length and grab the buffer to decode first
+    let bin_header_len: usize = decode::read_bin_len(&mut reader)? as usize;
+    let mut buf = vec![0u8; bin_header_len];
+    reader.read_exact(&mut buf)?;
+
+    // Calculate the header hash for use later
+    let digest: hash::Digest = hash::sha512::hash(&buf);
+
+    // We need to clone the buffer because we're decoding the common header first, then
+    // re-decoding the full header in each decode method
+    let tmpbuf = buf.clone();
+    let mut de = Deserializer::new(tmpbuf.as_slice());
+    let common: CommonHeader = Deserialize::deserialize(&mut de)?;
+    common.validate()?;
+
+    // Decode the full header
+    de = Deserializer::new(buf.as_slice());
+    let header: Header = match common.mode {
+        Mode::Encryption => Header::Encryption(Deserialize::deserialize(&mut de)?),
+        Mode::AttachedSigning | Mode::DetachedSigning => {
+            Header::Signing(Deserialize::deserialize(&mut de)?)
+        }
+        Mode::Signcryption => Header::Signcryption(Deserialize::deserialize(&mut de)?),
+    };
+    Ok((header, digest))
+}
