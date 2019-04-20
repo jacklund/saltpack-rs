@@ -3,7 +3,10 @@ extern crate base_x;
 extern crate byteorder;
 extern crate hex;
 extern crate hmac;
+#[macro_use]
+extern crate lazy_static;
 extern crate rand;
+extern crate regex;
 extern crate rmp;
 extern crate rmp_serde;
 extern crate rmpv;
@@ -15,6 +18,7 @@ extern crate sodiumoxide;
 extern crate serde_derive;
 extern crate serde_repr;
 
+mod armor;
 mod base62;
 mod cryptotypes;
 pub mod decrypt;
