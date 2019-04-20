@@ -16,7 +16,7 @@ lazy_static! {
         r"[>\n\r\t ]+MESSAGE|DETACHED[>\n\r\t ]+SIGNATURE)[>\n\r\t ]*$"
     ))
     .unwrap();
-    static ref WHITESPACE_REGEX: Regex = Regex::new(r"[>\n\r\t ]").unwrap();
+    static ref WHITESPACE_LIST: [u8; 5] = [b'>', b'\n', b'\r', b'\t', b' '];
 }
 
 const BLOCK_LENGTH: usize = 42;
@@ -50,14 +50,14 @@ impl<'a> Armor<'a> {
 }
 
 fn decode(buffer: &[u8]) -> std::io::Result<String> {
-    Ok(remove_whitespace(&str::from_utf8(buffer).map_err(
-        |_| {
+    Ok(str::from_utf8(buffer)
+        .map_err(|_| {
             std::io::Error::new(
                 ErrorKind::InvalidData,
                 "Armor payload is not utf-8".to_string(),
             )
-        },
-    )?))
+        })?
+        .to_string())
 }
 
 impl<'a> Read for Armor<'a> {
@@ -114,7 +114,7 @@ fn read_block<'a>(
 ) -> std::io::Result<Vec<u8>> {
     bytes
         .filter(|result| match result {
-            Ok(byte) => *byte != b' ',
+            Ok(byte) => !WHITESPACE_LIST.contains(byte),
             Err(_) => true,
         })
         .take_while(|result| match result {
@@ -146,10 +146,6 @@ fn read_footer<'a>(bytes: &mut Bytes<BufReader<&'a mut (dyn Read + 'a)>>) -> std
     } else {
         Ok(())
     }
-}
-
-fn remove_whitespace(string: &str) -> String {
-    WHITESPACE_REGEX.replace_all(string, "").to_string()
 }
 
 #[cfg(test)]
