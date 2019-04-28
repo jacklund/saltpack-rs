@@ -15,6 +15,7 @@ pub fn decode(input: &str) -> Result<Vec<u8>, Error> {
 #[cfg(test)]
 mod tests {
     use crate::base62::{decode, encode};
+    use crate::util::generate_random_data;
     use std::str;
 
     #[test]
@@ -30,5 +31,13 @@ mod tests {
         let text = "Hello, World!";
         let encoded = encode(text.as_bytes());
         assert_eq!("1wJfrzvdbtXUOlUjUf", encoded);
+    }
+
+    #[test]
+    fn test_base62_encode_decode() {
+        let data = generate_random_data(1024);
+        let encoded = encode(&data);
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(data, decoded);
     }
 }
