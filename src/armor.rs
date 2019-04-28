@@ -59,6 +59,7 @@ pub struct ArmorWriter<'a> {
     write_buffer: Vec<u8>,
     mode: Mode,
     header_written: bool,
+    closed: bool,
 }
 
 impl<'a> ArmorWriter<'a> {
@@ -68,6 +69,7 @@ impl<'a> ArmorWriter<'a> {
             write_buffer: vec![],
             mode,
             header_written: false,
+            closed: false,
         }
     }
 
@@ -88,10 +90,15 @@ impl<'a> ArmorWriter<'a> {
     }
 
     pub fn close(&mut self) -> std::io::Result<()> {
-        self.flush_write_buffer(true)?;
-        self.writer.write_fmt(format_args!(". "))?;
-        write_footer(&mut self.writer, &self.mode)?;
-        self.flush()
+        let mut ret = Ok(());
+        if !self.closed {
+            self.flush_write_buffer(true)?;
+            self.writer.write_fmt(format_args!(". "))?;
+            write_footer(&mut self.writer, &self.mode)?;
+            ret = self.flush();
+            self.closed = true;
+        }
+        ret
     }
 }
 
@@ -145,6 +152,14 @@ impl<'a> Write for ArmorWriter<'a> {
     fn flush(&mut self) -> std::io::Result<()> {
         self.flush_write_buffer(false)?;
         self.writer.flush()
+    }
+}
+
+impl<'a> Drop for ArmorWriter<'a> {
+    fn drop(&mut self) {
+        if !self.closed {
+            self.close().unwrap();
+        }
     }
 }
 
